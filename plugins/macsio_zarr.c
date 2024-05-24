@@ -1,4 +1,4 @@
-#include<stdio>
+#include<stdio.h>
 
 #include <macsio_clargs.h>
 #include <macsio_iface.h>
