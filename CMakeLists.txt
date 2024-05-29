@@ -61,7 +61,30 @@ IF(ENABLE_PDB_PLUGIN)
 	ADD_DEFINITIONS(-DHAVE_SILO)
 	SET(HAVE_SILO TRUE)
 ENDIF(ENABLE_PDB_PLUGIN)
+## ZARR (TENSORSTORE)
+OPTION(ENABLE_ZARR_PLUGIN "Enable ZARR Layer" OFF)
+IF(ENABLE_ZARR_PLUGIN)
+include(FetchContent)
 
+FetchContent_Declare(
+  tensorstore
+  GIT_REPOSITORY "https://github.com/google/tensorstore.git"
+  GIT_TAG master
+)
+
+# Additional FetchContent_Declare calls as needed...
+
+FetchContent_MakeAvailable(tensorstore)
+
+# Define a target that depends on TensorStore...
+
+target_link_libraries(
+  plugins/macsio_zarr.c
+  PRIVATE
+    tensorstore::tensorstore tensorstore::all_drivers
+)
+
+ENDIF(ENABLE_ZARR_PLUGIN)
 ## HDF5
 OPTION(ENABLE_HDF5_PLUGIN "Enable HDF5 Layer" OFF)
 IF(ENABLE_HDF5_PLUGIN)
