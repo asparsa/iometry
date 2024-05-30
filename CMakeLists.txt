@@ -72,7 +72,7 @@ FetchContent_Declare(
   GIT_REPOSITORY "https://github.com/google/tensorstore.git"
   GIT_TAG master
 )
-
+LIST(APPEND MIO_EXTERNAL_LIBS tensorstore::tensorstore tensorstore::all_drivers)
 # Additional FetchContent_Declare calls as needed...
 
 FetchContent_MakeAvailable(tensorstore)
