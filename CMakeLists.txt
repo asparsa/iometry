@@ -61,6 +61,7 @@ IF(ENABLE_PDB_PLUGIN)
 	ADD_DEFINITIONS(-DHAVE_SILO)
 	SET(HAVE_SILO TRUE)
 ENDIF(ENABLE_PDB_PLUGIN)
+
 ## ZARR (TENSORSTORE)
 OPTION(ENABLE_ZARR_PLUGIN "Enable ZARR Layer" OFF)
 IF(ENABLE_ZARR_PLUGIN)
@@ -77,12 +78,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(tensorstore)
 
 # Define a target that depends on TensorStore...
-
-target_link_libraries(
-  plugins/macsio_zarr.c
-  PRIVATE
-    tensorstore::tensorstore tensorstore::all_drivers
-)
 
 ENDIF(ENABLE_ZARR_PLUGIN)
 ## HDF5
