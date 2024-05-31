@@ -75,6 +75,7 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(tensorstore)
  LIST(APPEND MIO_EXTERNAL_LIBS tensorstore::tensorstore tensorstore::all_drivers)
+ ADD_DEFINITIONS(-DHAVE_TENSORSTORE)
 # Define a target that depends on TensorStore...
 
 ENDIF(ENABLE_ZARR_PLUGIN)
