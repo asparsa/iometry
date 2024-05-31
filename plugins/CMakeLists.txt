@@ -13,16 +13,6 @@ ENDIF(ENABLE_PDB_PLUGIN)
 
 IF(ENABLE_ZARR_PLUGIN)
     LIST(APPEND plugin_srcs ${PROJECT_SOURCE_DIR}/plugins/macsio_zarr.c)
-    include(FetchContent)
-
-FetchContent_Declare(
-  tensorstore
-  GIT_REPOSITORY https://github.com/google/tensorstore.git
-  GIT_TAG main
-)
-
-FetchContent_MakeAvailable(tensorstore)
-    target_link_libraries(${PROJECT_SOURCE_DIR}/plugins/macsio_zarr.c PRIVATE tensorstore)
 ENDIF(ENABLE_ZARR_PLUGIN)
 
 IF(ENABLE_EXODUS_PLUGIN)
