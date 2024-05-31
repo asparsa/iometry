@@ -70,7 +70,7 @@ IF(ENABLE_ZARR_PLUGIN)
 FetchContent_Declare(
   tensorstore
   GIT_REPOSITORY https://github.com/google/tensorstore.git
-  GIT_TAG main
+  GIT_TAG master
 )
 
 FetchContent_MakeAvailable(tensorstore)
