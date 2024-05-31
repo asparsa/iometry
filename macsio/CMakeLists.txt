@@ -60,6 +60,9 @@ ENDIF (ENABLE_PDB_PLUGIN)
 IF (ENABLE_HDF5_PLUGIN)
     ADD_TEST(NAME hdf5 COMMAND ${TEST_RUN} ./macsio --interface hdf5 --plugin_args --show_errors)
 ENDIF (ENABLE_HDF5_PLUGIN)
+IF (ENABLE_ZARR_PLUGIN)
+    ADD_TEST(NAME zarr COMMAND ${TEST_RUN} ./macsio --interface zarr --plugin_args --show_errors)
+ENDIF (ENABLE_ZARR_PLUGIN)
 
 INSTALL(TARGETS macsio RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
 
