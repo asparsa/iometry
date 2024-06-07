@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include <json-c/json.h>
-#include <tensorstore/tensorstore.h>
 
 #include <macsio_clargs.h>
 #include <macsio_iface.h>
@@ -14,11 +13,37 @@
 #include <macsio_mif.h>
 #include <macsio_timing.h>
 #include <macsio_utils.h>
+#include <nlohmann/json.hpp>
+
+#include <tensorstore/tensorstore.h>
+#include <tensorstore/context.h>
+#include <tensorstore/util/status.h>
+#include <tensorstore/util/result.h>
+#include <tensorstore/index_space/index_transform.h>
+#include <tensorstore/index_space/dim_expression.h>
 
 #ifdef HAVE_MPI
 #include <mpi.h>
 #endif
 
+std::string Bytes(std::vector<unsigned char> values) {
+  return std::string(reinterpret_cast<const char*>(values.data()),
+                     values.size());
+}
+
+::nlohmann::json GetJsonSpec() {
+  return {
+      {"driver", "zarr"},
+      {"kvstore", {{"driver", "memory"}, {"path", "prefix/"}}},
+      {"metadata",
+       {
+           {"compressor", {{"id", "blosc"}}},
+           {"dtype", "<i2"},
+           {"shape", {100, 100}},
+           {"chunks", {3, 2}},
+       }},
+  };
+}
 static char const *iface_name = "tensorstore";
 static char const *iface_ext = "tstore";
 
@@ -50,31 +75,45 @@ static int process_args(int argi, int argc, char *argv[]) {
 
 /*! \brief Main dump callback for TensorStore plugin */
 static void main_dump(int argi, int argc, char **argv, json_object *main_obj, int dumpn, double dumpt) {
-  tensorstore::Context context = tensorstore::Context::Default();
+::nlohmann::json json_spec = GetJsonSpec();
 
-  std::string path = "C:/Dev/ITKIOOMEZarrNGFF/v0.4/cyx.ome.zarr/s0";
+  auto context = tensorstore::Context::Default();
 
-  auto openFuture =
-    tensorstore::Open({ { "driver", "zarr" }, { "kvstore", { { "driver", "file" }, { "path", path } } } },
-                      context,
-                      tensorstore::OpenMode::open,
-                      tensorstore::RecheckCached{ false },
-                      tensorstore::ReadWriteMode::read);
-
-  auto result = openFuture.result();
-  if (result.ok())
-  {
-    std::cout << "status OK";
-    auto store = result.value();
-    std::cout << store.domain().shape();
+  // Create the store.
+  auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode::create,
+                                        tensorstore::ReadWriteMode::read_write).result();
+  if (!store_result.ok()) {
+    std::cerr << "Failed to create store: " << store_result.status() << std::endl;
+    return 1;
   }
-  else
-  {
-    std::cout << "status BAD\n" << result.status();
-    return EXIT_FAILURE;
+  auto store = *store_result;
+
+  // Write to the store.
+  auto write_result = tensorstore::Write(
+      tensorstore::MakeArray<int16_t>({{1, 2, 3}, {4, 5, 6}}),
+      store | tensorstore::AllDims().TranslateSizedInterval({9, 8}, {2, 3})).result();
+
+  if (!write_result.ok()) {
+    std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
+    return 1;
   }
 
-  return EXIT_SUCCESS;
+  // Read from the store.
+  auto read_result = tensorstore::Read<tensorstore::zero_origin>(
+      store | tensorstore::AllDims().TranslateSizedInterval({9, 7}, {3, 5})).result();
+
+  if (!read_result.ok()) {
+    std::cerr << "Failed to read from store: " << read_result.status() << std::endl;
+  }
+
+  // Print the read result.
+  auto array = *read_result;
+  for (const auto& row : array) {
+    for (const auto& elem : row) {
+      std::cout << elem << " ";
+    }
+    std::cout << std::endl;
+  }
 }
 
 static int register_this_interface() {

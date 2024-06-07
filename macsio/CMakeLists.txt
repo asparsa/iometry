@@ -40,10 +40,7 @@ TARGET_LINK_LIBRARIES(tstlog ${MIO_EXTERNAL_LIBS})
 TARGET_LINK_LIBRARIES(tsttiming ${MIO_EXTERNAL_LIBS})
 TARGET_LINK_LIBRARIES(tstprng ${MIO_EXTERNAL_LIBS})
 TARGET_LINK_LIBRARIES(tstclargs ${MIO_EXTERNAL_LIBS})
-target_link_libraries(macsio
-  PRIVATE
-    tensorstore::tensorstore tensorstore::all_drivers
-)
+TARGET_LINK_LIBRARIES(macsio PRIVATE tensorstore::tensorstore tensorstore::all_drivers)
 
 IF(ENABLE_MPI)
     SET(TEST_RUN ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} 3)
