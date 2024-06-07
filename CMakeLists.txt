@@ -65,18 +65,17 @@ ENDIF(ENABLE_PDB_PLUGIN)
 ## ZARR (TENSORSTORE)
 OPTION(ENABLE_ZARR_PLUGIN "Enable ZARR Layer" OFF)
 IF(ENABLE_ZARR_PLUGIN)
-include(FetchContent)
+    include(FetchContent)
 
 FetchContent_Declare(
   tensorstore
-  GIT_REPOSITORY "https://github.com/google/tensorstore.git"
+  GIT_REPOSITORY https://github.com/google/tensorstore.git
   GIT_TAG master
 )
 
-# Additional FetchContent_Declare calls as needed...
-
 FetchContent_MakeAvailable(tensorstore)
-
+ LIST(APPEND MIO_EXTERNAL_LIBS tensorstore::tensorstore tensorstore::all_drivers)
+ ADD_DEFINITIONS(-DHAVE_TENSORSTORE)
 # Define a target that depends on TensorStore...
 
 ENDIF(ENABLE_ZARR_PLUGIN)

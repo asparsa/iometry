@@ -40,6 +40,10 @@ TARGET_LINK_LIBRARIES(tstlog ${MIO_EXTERNAL_LIBS})
 TARGET_LINK_LIBRARIES(tsttiming ${MIO_EXTERNAL_LIBS})
 TARGET_LINK_LIBRARIES(tstprng ${MIO_EXTERNAL_LIBS})
 TARGET_LINK_LIBRARIES(tstclargs ${MIO_EXTERNAL_LIBS})
+target_link_libraries(macsio
+  PRIVATE
+    tensorstore::tensorstore tensorstore::all_drivers
+)
 
 IF(ENABLE_MPI)
     SET(TEST_RUN ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} 3)
@@ -60,6 +64,9 @@ ENDIF (ENABLE_PDB_PLUGIN)
 IF (ENABLE_HDF5_PLUGIN)
     ADD_TEST(NAME hdf5 COMMAND ${TEST_RUN} ./macsio --interface hdf5 --plugin_args --show_errors)
 ENDIF (ENABLE_HDF5_PLUGIN)
+IF (ENABLE_ZARR_PLUGIN)
+    ADD_TEST(NAME zarr COMMAND ${TEST_RUN} ./macsio --interface zarr --plugin_args --show_errors)
+ENDIF (ENABLE_ZARR_PLUGIN)
 
 INSTALL(TARGETS macsio RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
 
