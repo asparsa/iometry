@@ -14,6 +14,7 @@
 #include <macsio_timing.h>
 #include <macsio_utils.h>
 #include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 
 #include <tensorstore/tensorstore.h>
 #include <tensorstore/context.h>
