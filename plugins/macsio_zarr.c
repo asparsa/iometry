@@ -124,31 +124,31 @@ static void main_dump_sif(json_object *main_obj, int dumpn, double dumpt) {
 
 /*! \brief Main dump callback for TensorStore plugin */
 static void main_dump(int argi, int argc, char **argv, json_object *main_obj, int dumpn, double dumpt) {
-    MACSIO_TIMING_GroupMask_t main_dump_grp = MACSIO_TIMING_GroupMask("main_dump");
-    MACSIO_TIMING_TimerId_t main_dump_tid;
-    double timer_dt;
+  tensorstore::Context context = tensorstore::Context::Default();
 
-    int rank, size, numFiles;
+  std::string path = "C:/Dev/ITKIOOMEZarrNGFF/v0.4/cyx.ome.zarr/s0";
 
-#ifdef HAVE_MPI
-    MPI_Barrier(MACSIO_MAIN_Comm);
-#endif
+  auto openFuture =
+    tensorstore::Open({ { "driver", "zarr" }, { "kvstore", { { "driver", "file" }, { "path", path } } } },
+                      context,
+                      tensorstore::OpenMode::open,
+                      tensorstore::RecheckCached{ false },
+                      tensorstore::ReadWriteMode::read);
 
-    process_args(argi, argc, argv);
+  auto result = openFuture.result();
+  if (result.ok())
+  {
+    std::cout << "status OK";
+    auto store = result.value();
+    std::cout << store.domain().shape();
+  }
+  else
+  {
+    std::cout << "status BAD\n" << result.status();
+    return EXIT_FAILURE;
+  }
 
-    rank = json_object_path_get_int(main_obj, "parallel/mpi_rank");
-    size = json_object_path_get_int(main_obj, "parallel/mpi_size");
-
-    json_object *parfmode_obj = json_object_path_get_array(main_obj, "clargs/parallel_file_mode");
-    if (parfmode_obj) {
-        json_object *modestr = json_object_array_get_idx(parfmode_obj, 0);
-        json_object *filecnt = json_object_array_get_idx(parfmode_obj, 1);
-        if (!strcmp(json_object_get_string(modestr), "SIF")) {
-            main_dump_tid = MT_StartTimer("main_dump_sif", main_dump_grp, dumpn);
-            main_dump_sif(main_obj, dumpn, dumpt);
-            timer_dt = MT_StopTimer(main_dump_tid);
-        }
-    }
+  return EXIT_SUCCESS;
 }
 
 static int register_this_interface() {
