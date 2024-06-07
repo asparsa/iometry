@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include <json-c/json.h>
-#include <tensorstore/tensorstore.h>
 
 #include <macsio_clargs.h>
 #include <macsio_iface.h>
@@ -14,8 +13,14 @@
 #include <macsio_mif.h>
 #include <macsio_timing.h>
 #include <macsio_utils.h>
-#include "tensorstore/context.h"
-#include "tensorstore/open.h"
+#include <nlohmann/json.hpp>
+
+#include <tensorstore/tensorstore.h>
+#include <tensorstore/context.h>
+#include <tensorstore/util/status.h>
+#include <tensorstore/util/result.h>
+#include <tensorstore/index_space/index_transform.h>
+#include <tensorstore/index_space/dim_expression.h>
 
 #ifdef HAVE_MPI
 #include <mpi.h>
@@ -70,161 +75,45 @@ static int process_args(int argi, int argc, char *argv[]) {
 
 /*! \brief Main dump callback for TensorStore plugin */
 static void main_dump(int argi, int argc, char **argv, json_object *main_obj, int dumpn, double dumpt) {
-  ::nlohmann::json json_spec = GetJsonSpec();
+::nlohmann::json json_spec = GetJsonSpec();
 
-  auto context = Context::Default();
+  auto context = tensorstore::Context::Default();
+
   // Create the store.
-  {
-    TENSORSTORE_ASSERT_OK_AND_ASSIGN(
-        auto store,
-        tensorstore::Open(json_spec, context, tensorstore::OpenMode::create,
-                          tensorstore::ReadWriteMode::read_write)
-            .result());
-    EXPECT_THAT(store.domain().origin(), ::testing::ElementsAre(0, 0));
-    EXPECT_THAT(store.domain().shape(), ::testing::ElementsAre(100, 100));
-    EXPECT_THAT(store.domain().labels(), ::testing::ElementsAre("", ""));
-    EXPECT_THAT(store.domain().implicit_lower_bounds(),
-                DimensionSet::FromBools({0, 0}));
-    EXPECT_THAT(store.domain().implicit_upper_bounds(),
-                DimensionSet::FromBools({1, 1}));
+  auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode::create,
+                                        tensorstore::ReadWriteMode::read_write).result();
+  if (!store_result.ok()) {
+    std::cerr << "Failed to create store: " << store_result.status() << std::endl;
+    return 1;
+  }
+  auto store = *store_result;
 
-    // Test ResolveBounds.
-    auto resolved = ResolveBounds(store).value();
-    EXPECT_EQ(store.domain(), resolved.domain());
+  // Write to the store.
+  auto write_result = tensorstore::Write(
+      tensorstore::MakeArray<int16_t>({{1, 2, 3}, {4, 5, 6}}),
+      store | tensorstore::AllDims().TranslateSizedInterval({9, 8}, {2, 3})).result();
 
-    // Test ResolveBounds with a transform that swaps upper and lower bounds.
-    TENSORSTORE_ASSERT_OK_AND_ASSIGN(
-        auto reversed_dim0,
-        store | tensorstore::Dims(0).ClosedInterval(kImplicit, kImplicit, -1));
-    auto resolved_reversed_dim0 = ResolveBounds(reversed_dim0).value();
-    EXPECT_EQ(reversed_dim0.domain(), resolved_reversed_dim0.domain());
-
-    // Issue a read to be filled with the fill value.
-    EXPECT_THAT(tensorstore::Read<tensorstore::zero_origin>(
-                    store | tensorstore::AllDims().TranslateSizedInterval(
-                                {9, 7}, {1, 1}))
-                    .result(),
-                ::testing::Optional(tensorstore::MakeArray<int16_t>({{0}})));
-
-    // Issue an out-of-bounds read.
-    EXPECT_THAT(tensorstore::Read<tensorstore::zero_origin>(
-                    store | tensorstore::AllDims().TranslateSizedInterval(
-                                {100, 7}, {1, 1}))
-                    .result(),
-                MatchesStatus(absl::StatusCode::kOutOfRange));
-
-    // Issue a valid write.
-    TENSORSTORE_EXPECT_OK(tensorstore::Write(
-        tensorstore::MakeArray<int16_t>({{1, 2, 3}, {4, 5, 6}}),
-        store | tensorstore::AllDims().TranslateSizedInterval({9, 8}, {2, 3})));
-
-    // Issue an out-of-bounds write.
-    EXPECT_THAT(tensorstore::Write(
-                    tensorstore::MakeArray<int16_t>({{1, 2, 3}, {4, 5, 6}}),
-                    store | tensorstore::AllDims().TranslateSizedInterval(
-                                {100, 8}, {2, 3}))
-                    .result(),
-                MatchesStatus(absl::StatusCode::kOutOfRange));
-
-    // Re-read and validate result.
-    EXPECT_THAT(tensorstore::Read<tensorstore::zero_origin>(
-                    store | tensorstore::AllDims().TranslateSizedInterval(
-                                {9, 7}, {3, 5}))
-                    .result(),
-                ::testing::Optional(tensorstore::MakeArray<int16_t>(
-                    {{0, 1, 2, 3, 0}, {0, 4, 5, 6, 0}, {0, 0, 0, 0, 0}})));
+  if (!write_result.ok()) {
+    std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
+    return 1;
   }
 
-  // Check that key value store has expected contents.
-  EXPECT_THAT(
-      GetMap(kvstore::Open({{"driver", "memory"}}, context).value()).value(),
-      UnorderedElementsAreArray({
-          Pair("prefix/.zarray",  //
-               ::testing::MatcherCast<absl::Cord>(ParseJsonMatches({
-                   {"zarr_format", 2},
-                   {"order", "C"},
-                   {"filters", nullptr},
-                   {"fill_value", nullptr},
-                   {"compressor",
-                    {{"id", "blosc"},
-                     {"blocksize", 0},
-                     {"clevel", 5},
-                     {"cname", "lz4"},
-                     {"shuffle", -1}}},
-                   {"dtype", "<i2"},
-                   {"shape", {100, 100}},
-                   {"chunks", {3, 2}},
-                   {"dimension_separator", "."},
-               }))),
-          Pair("prefix/3.4",    //
-               DecodedMatches(  //
-                   Bytes({1, 0, 2, 0, 4, 0, 5, 0, 0, 0, 0, 0}),
-                   tensorstore::blosc::Decode)),
-          Pair("prefix/3.5",    //
-               DecodedMatches(  //
-                   Bytes({3, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0}),
-                   tensorstore::blosc::Decode)),
-      }));
+  // Read from the store.
+  auto read_result = tensorstore::Read<tensorstore::zero_origin>(
+      store | tensorstore::AllDims().TranslateSizedInterval({9, 7}, {3, 5})).result();
 
-  // Check that attempting to create the store again fails.
-  EXPECT_THAT(
-      tensorstore::Open(json_spec, context, tensorstore::OpenMode::create,
-                        tensorstore::ReadWriteMode::read_write)
-          .result(),
-      MatchesStatus(absl::StatusCode::kAlreadyExists,
-                    "Error opening \"zarr\" driver: "
-                    "Error writing \"prefix/\\.zarray\""));
-
-  // Check that create or open succeeds.
-  TENSORSTORE_EXPECT_OK(tensorstore::Open(
-      json_spec, context,
-      tensorstore::OpenMode::create | tensorstore::OpenMode::open,
-      tensorstore::ReadWriteMode::read_write));
-
-  // Check that open succeeds.
-  {
-    TENSORSTORE_ASSERT_OK_AND_ASSIGN(
-        auto store,
-        tensorstore::Open(json_spec, context, tensorstore::OpenMode::open,
-                          tensorstore::ReadWriteMode::read_write)
-            .result());
-    EXPECT_THAT(tensorstore::Read<tensorstore::zero_origin>(
-                    store | tensorstore::AllDims().TranslateSizedInterval(
-                                {9, 7}, {3, 5}))
-                    .result(),
-                ::testing::Optional(tensorstore::MakeArray<int16_t>(
-                    {{0, 1, 2, 3, 0}, {0, 4, 5, 6, 0}, {0, 0, 0, 0, 0}})));
+  if (!read_result.ok()) {
+    std::cerr << "Failed to read from store: " << read_result.status() << std::endl;
   }
 
-  // Check that delete_existing works.
-  for (auto transaction_mode :
-       {tensorstore::TransactionMode::no_transaction_mode,
-        tensorstore::TransactionMode::isolated,
-        tensorstore::TransactionMode::atomic_isolated}) {
-    tensorstore::Transaction transaction(transaction_mode);
-    TENSORSTORE_ASSERT_OK_AND_ASSIGN(
-        auto store,
-        tensorstore::Open(json_spec, context, transaction,
-                          tensorstore::OpenMode::create |
-                              tensorstore::OpenMode::delete_existing,
-                          tensorstore::ReadWriteMode::read_write)
-            .result());
-
-    EXPECT_THAT(tensorstore::Read<tensorstore::zero_origin>(
-                    store | tensorstore::AllDims().TranslateSizedInterval(
-                                {9, 7}, {3, 5}))
-                    .result(),
-                ::testing::Optional(tensorstore::MakeArray<int16_t>(
-                    {{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}})));
-    TENSORSTORE_ASSERT_OK(transaction.CommitAsync());
-    TENSORSTORE_ASSERT_OK_AND_ASSIGN(
-        auto kvs, kvstore::Open({{"driver", "memory"}}, context).result());
-    EXPECT_THAT(
-        ListFuture(kvs).value(),
-        ::testing::UnorderedElementsAre(MatchesListEntry("prefix/.zarray")));
+  // Print the read result.
+  auto array = *read_result;
+  for (const auto& row : array) {
+    for (const auto& elem : row) {
+      std::cout << elem << " ";
+    }
+    std::cout << std::endl;
   }
-}
-
 }
 
 static int register_this_interface() {
