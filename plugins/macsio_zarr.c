@@ -16,17 +16,23 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
-#include <tensorstore/tensorstore.h>
-#include <tensorstore/context.h>
-#include <tensorstore/util/status.h>
-#include <tensorstore/util/result.h>
-#include <tensorstore/index_space/index_transform.h>
+#include "tensorstore/array.h"
+#include "tensorstore/context.h"
+#include "tensorstore/data_type.h"
+#include "tensorstore/index.h"
+#include "tensorstore/json_serialization_options_base.h"
+#include "tensorstore/open.h"
+#include "tensorstore/open_mode.h"
+#include "tensorstore/tensorstore.h"
 #include <tensorstore/index_space/dim_expression.h>
-
+#include "tensorstore/util/result.h"
 #ifdef HAVE_MPI
 #include <mpi.h>
 #endif
-
+namespace{
+using ::tensorstore::Context;
+using ::tensorstore::DimensionSet;
+using ::tensorstore::DimensionIndex;
 std::string Bytes(std::vector<unsigned char> values) {
   return std::string(reinterpret_cast<const char*>(values.data()),
                      values.size());
@@ -35,7 +41,7 @@ std::string Bytes(std::vector<unsigned char> values) {
 ::nlohmann::json GetJsonSpec() {
   return {
       {"driver", "zarr"},
-      {"kvstore", {{"driver", "memory"}, {"path", "prefix/"}}},
+      {"kvstore", {{"driver", "file"}, {"path", "prefix/"}}},
       {"metadata",
        {
            {"compressor", {{"id", "blosc"}}},
@@ -44,6 +50,7 @@ std::string Bytes(std::vector<unsigned char> values) {
            {"chunks", {3, 2}},
        }},
   };
+}
 }
 static char const *iface_name = "tensorstore";
 static char const *iface_ext = "tstore";
@@ -61,31 +68,40 @@ static int process_args(int argi, int argc, char *argv[]) {
 
     MACSIO_CLARGS_ProcessCmdline(0, argFlags, argi, argc, argv,
         "--show_errors", "",
-            "Show low-level TensorStore errors",
+            "Show TensorStore errors",
             &show_errors,
-        "--no_collective", "",
-            "Use independent, not collective, I/O calls in SIF mode.",
-            &no_collective,
-        "--no_single_chunk", "",
-            "Do not single chunk the datasets (currently ignored).",
-            &no_single_chunk,
            MACSIO_CLARGS_END_OF_ARGS);
 
     return 0;
 }
+/*
+static void *CreateMyFile(
+		const char *fname,
+		const char *nsname,
+		void *userdata){
+	::nlohmann::json json_spec = GetJsonSpec();
+auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode:open, tensorstore::ReadWriteMode::read_write);
+return (void *) store_result;
+}
 
-/*! \brief Main dump callback for TensorStore plugin */
+static void *OpenMyFile( 
+		const char *fname,
+		const char *nsname,
+		MACSIO_MIF_ioFlags_t ioFlags,
+		 void *userdata){
+	::nlohmann::json json_spec = GetJsonSpec();
+auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode:open, tensorstore::ReadWriteMode:read_write);	
+return (void *) store_result;
+*/
 static void main_dump(int argi, int argc, char **argv, json_object *main_obj, int dumpn, double dumpt) {
-::nlohmann::json json_spec = GetJsonSpec();
-
-  auto context = tensorstore::Context::Default();
+  ::nlohmann::json json_spec = GetJsonSpec();
+ auto context = Context::Default();
 
   // Create the store.
-  auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode::create,
+  auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode::create |tensorstore::OpenMode::open,
                                         tensorstore::ReadWriteMode::read_write).result();
   if (!store_result.ok()) {
     std::cerr << "Failed to create store: " << store_result.status() << std::endl;
-    return 1;
   }
   auto store = *store_result;
 
@@ -96,9 +112,8 @@ static void main_dump(int argi, int argc, char **argv, json_object *main_obj, in
 
   if (!write_result.ok()) {
     std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
-    return 1;
   }
-
+/*
   // Read from the store.
   auto read_result = tensorstore::Read<tensorstore::zero_origin>(
       store | tensorstore::AllDims().TranslateSizedInterval({9, 7}, {3, 5})).result();
@@ -114,7 +129,7 @@ static void main_dump(int argi, int argc, char **argv, json_object *main_obj, in
       std::cout << elem << " ";
     }
     std::cout << std::endl;
-  }
+  }*/
 }
 
 static int register_this_interface() {
