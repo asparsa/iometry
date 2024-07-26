@@ -915,98 +915,102 @@ static json_object *
 make_scalar_var(int ndims, int const *dims, double const *bounds,
     char const *centering, char const *dtype, char const *kind)
 {
-    json_object *var_obj = json_object_new_object();
-    int i,j,k,n;
-    int dims2[3] = {1,1,1};
-    double dims_diameter2 = 1;
-    int minus_one = strcmp(centering, "zone")?0:-1;
-    json_object *data_obj;
-    double *valdp;
-    int    *valip;
-
-    for (i = 0; i < ndims; i++)
-    { 
-        dims2[i] = dims[i] + minus_one;
-        dims_diameter2 += dims[i]*dims[i];
+    // Validate input parameters
+    if (dims == NULL || bounds == NULL || centering == NULL || dtype == NULL || kind == NULL) {
+        fprintf(stderr, "Error: One or more input parameters are NULL\n");
+        return NULL;
     }
 
-//#warning NEED EXPLICIT NAME FOR VARIABLE
+    // Initialize JSON object
+    json_object *var_obj = json_object_new_object();
+    if (var_obj == NULL) {
+        fprintf(stderr, "Error: Failed to create JSON object\n");
+        return NULL;
+    }
+
+    int i, j, k, n;
+    int dims2[3] = {1, 1, 1};
+    double dims_diameter2 = 1;
+    int minus_one = strcmp(centering, "zone") ? 0 : -1;
+    json_object *data_obj = NULL;
+    double *valdp = NULL;
+    int *valip = NULL;
+
+    for (i = 0; i < ndims; i++) {
+        dims2[i] = dims[i] + minus_one;
+        dims_diameter2 += dims[i] * dims[i];
+    }
+
+    // Add attributes to JSON object
     json_object_object_add(var_obj, "name", json_object_new_string(kind));
     json_object_object_add(var_obj, "centering", json_object_new_string(centering));
-    if (!strcmp(dtype, "double"))
+    
+    // Allocate memory for data object
+    if (!strcmp(dtype, "double")) {
         data_obj = json_object_new_extarr_alloc(json_extarr_type_flt64, ndims, dims2, 0);
-    else if (!strcmp(dtype, "int"))
+    } else if (!strcmp(dtype, "int")) {
         data_obj = json_object_new_extarr_alloc(json_extarr_type_int32, ndims, dims2, 0);
+    }
+    
+    if (data_obj == NULL) {
+        fprintf(stderr, "Error: Failed to create data JSON object\n");
+        json_object_put(var_obj);
+        return NULL;
+    }
+
     json_object_object_add(var_obj, "data", data_obj);
-    valdp = (double *) json_object_extarr_data(data_obj);
-    valip = (int *) json_object_extarr_data(data_obj);
+    valdp = (double *)json_object_extarr_data(data_obj);
+    valip = (int *)json_object_extarr_data(data_obj);
 
     int exp_random_type = -1;
-    if (strstr(kind, "expansion")!=NULL){
-        exp_random_type = MD_random()%8;
+    if (strstr(kind, "expansion") != NULL) {
+        exp_random_type = MD_random() % 8;
     }
 
     n = 0;
-//#warning PASS RANK OR RANDOM SEED IN HERE TO ENSURE DIFF PROCESSORS HAVE DIFF RANDOM DATA
-    for (k = 0; k < dims2[2]; k++)
-    {
-        for (j = 0; j < dims2[1]; j++)
-        {
-            for (i = 0; i < dims2[0]; i++)
-            {
-//#warning PUT THESE INTO A GENERATOR FUNCTION
-//#warning ACCOUNT FOR HALF ZONE OFFSETS
-                if (strstr(kind, "constant")!=NULL || exp_random_type == 1)
+
+    // Generate data values
+    for (k = 0; k < dims2[2]; k++) {
+        for (j = 0; j < dims2[1]; j++) {
+            for (i = 0; i < dims2[0]; i++) {
+                if (strstr(kind, "constant") != NULL || exp_random_type == 1) {
                     valdp[n++] = 1.0;
-                else if (strstr(kind, "random")!=NULL || exp_random_type == 2)
-                    valdp[n++] = (double) (MD_random() % 1000) / 1000;
-                else if (strstr(kind, "xramp")!=NULL || exp_random_type == 3)
+                } else if (strstr(kind, "random") != NULL || exp_random_type == 2) {
+                    valdp[n++] = (double)(MD_random() % 1000) / 1000;
+                } else if (strstr(kind, "xramp") != NULL || exp_random_type == 3) {
                     valdp[n++] = bounds[0] + i * MACSIO_UTILS_XDelta(dims, bounds);
-                else if (strstr(kind, "spherical")!=NULL || exp_random_type == 4)
-                {
+                } else if (strstr(kind, "spherical") != NULL || exp_random_type == 4) {
                     double x = bounds[0] + i * MACSIO_UTILS_XDelta(dims, bounds);
                     double y = bounds[1] + j * MACSIO_UTILS_YDelta(dims, bounds);
                     double z = bounds[2] + k * MACSIO_UTILS_ZDelta(dims, bounds);
-                    valdp[n++] = sqrt(x*x+y*y+z*z);
-                }
-                else if (strstr(kind, "noise")!=NULL || exp_random_type == 5)
-                {
+                    valdp[n++] = sqrt(x * x + y * y + z * z);
+                } else if (strstr(kind, "noise") != NULL || exp_random_type == 5) {
                     double x = bounds[0] + i * MACSIO_UTILS_XDelta(dims, bounds);
                     double y = bounds[1] + j * MACSIO_UTILS_YDelta(dims, bounds);
                     double z = bounds[2] + k * MACSIO_UTILS_ZDelta(dims, bounds);
-                    valdp[n++] = noise(x,y,z,bounds);
-                }
-                else if (strstr(kind, "noise_sum")!=NULL || exp_random_type == 6)
-                {
-//#warning SHOULD USE GLOBAL DIMS DIAMETER HERE
-                    int q, nlevels = (int) log2(sqrt(dims_diameter2))+1;
+                    valdp[n++] = noise(x, y, z, bounds);
+                } else if (strstr(kind, "noise_sum") != NULL || exp_random_type == 6) {
+                    int q, nlevels = (int)log2(sqrt(dims_diameter2)) + 1;
                     double x = bounds[0] + i * MACSIO_UTILS_XDelta(dims, bounds);
                     double y = bounds[1] + j * MACSIO_UTILS_YDelta(dims, bounds);
                     double z = bounds[2] + k * MACSIO_UTILS_ZDelta(dims, bounds);
                     double mult = 1;
                     valdp[n++] = 0;
-                    for (q = 0; q < nlevels; q++)
-                    {
-                        valdp[n-1] += 1/mult * fabs(noise(mult*x,mult*y,mult*z,bounds));
+                    for (q = 0; q < nlevels; q++) {
+                        valdp[n - 1] += 1 / mult * fabs(noise(mult * x, mult * y, mult * z, bounds));
                         mult *= 2;
                     }
-                }
-                else if (strstr(kind, "ysin")!=NULL || exp_random_type == 7)
-                {
+                } else if (strstr(kind, "ysin") != NULL || exp_random_type == 7) {
                     double y = bounds[1] + j * MACSIO_UTILS_YDelta(dims, bounds);
-                    valdp[n++] = sin(y*3.1415266);
-                }
-                else if (strstr(kind, "xlayers")!=NULL || exp_random_type == 8)
-                {
+                    valdp[n++] = sin(y * 3.1415266);
+                } else if (strstr(kind, "xlayers") != NULL || exp_random_type == 8) {
                     valip[n++] = (i / 20) % 3;
                 }
             }
         }
     }
-//#warning ADD CHECKSUM TO JSON OBJECT
 
-    return var_obj; 
-
+    return var_obj;
 }
 
 static json_object *
