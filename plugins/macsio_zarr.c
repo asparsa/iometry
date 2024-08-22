@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
+#include <random>
 
 #include <json-cwx/json.h>
 #include <macsio_clargs.h>
@@ -25,31 +27,93 @@
 #include "tensorstore/tensorstore.h"
 #include <tensorstore/index_space/dim_expression.h>
 #include "tensorstore/util/result.h"
-#ifdef HAVE_MPI
-#include <mpi.h>
-#endif
+#include "tensorstore/index.h"
+#include "tensorstore/index_space/dim_expression.h"
+#include "tensorstore/index_space/index_transform.h"
+#include "tensorstore/index_space/transformed_array.h"
+#include "tensorstore/util/endian.h"
+std::mt19937 gen(42); // Use a fixed seed (42 in this case)
+std::uniform_int_distribution<> distrib(0, 999);
+
 namespace{
 using ::tensorstore::Context;
 using ::tensorstore::DimensionSet;
 using ::tensorstore::DimensionIndex;
-std::string Bytes(std::vector<unsigned char> values) {
-  return std::string(reinterpret_cast<const char*>(values.data()),
-                     values.size());
+using ::tensorstore::Index;
+}
+/*
+::nlohmann::json GetJsonSpec(const char* path, const std::vector<int> shape, const std::vector<int> chunksize, const int numthread, std::optional<int> level = std::nullopt) {
+    ::nlohmann::json json_spec = {
+        {"driver", "zarr3"},
+        {"kvstore",
+         {
+             {"driver", "file"},
+             {"path", path},
+             {"file_io_concurrency", {{"limit", numthread}}}
+         }},
+        {"metadata",
+         {
+             {"zarr_format", 3},
+             {"data_type", "float64"},
+             {"shape", shape},
+             {"chunk_grid", {
+                 {"name", "regular"},
+                 {"configuration", {
+                     {"chunk_shape", chunksize}
+                 }}
+             }}
+         }}
+    };
+
+    if (level.has_value()) {
+        json_spec["metadata"]["codecs"] = {
+            {
+                {"name", "gzip"},
+                {"configuration", {{"level", level.value()}}}
+            }
+        };
+    }
+
+    return json_spec;
 }
 
-::nlohmann::json GetJsonSpec(const char* path) {
+::nlohmann::json GetJsonSpec2(const char* path, const std::vector<int> shape, const std::vector<int> chunksize,const int numthread) {
+  return ::nlohmann::json{
+        {"driver", "zarr3"},
+        {"kvstore",
+         {
+             {"driver", "file"},
+             {"path", path},
+	     {"file_io_concurrency",{{"limit",numthread}}}
+         }},
+        {"metadata",
+         {
+             {"zarr_format", 3},
+             {"data_type", "int32"},
+             {"shape", shape},
+	     {"chunk_grid", {
+                {"name", "regular"},
+                {"configuration", {
+                    {"chunk_shape", shape}
+                }}
+			    }}}}};
+}
+*/
+::nlohmann::json GetJsonSpec(std::vector<int> shape) {
   return {
-      {"driver", "zarr"},
-      {"kvstore", {{"driver", "file"}, {"path", path}}},
+      {"driver", "zarr3"},
+      {"kvstore", {{"driver", "file"}, {"path", "testo/"},{"file_io_concurrency",{{"limit",1}}}}},
       {"metadata",
-       {
-           {"dtype", "<i2"},
-           {"shape", {99,99}},
-           {"chunks", {99,99}},
-       }},
+       {{"data_type", "float64"},
+        {"shape", {32768,16384}},
+        {"chunk_grid",
+         {{"name", "regular"},
+          {"configuration", {{"chunk_shape", {32768,16384}}}}}}}},
   };
 }
-}
+
+
+static auto context = Context::Default();
 static char const *iface_name = "zarr";
 static char const *iface_ext = "zarr";
 
@@ -59,8 +123,12 @@ static int no_single_chunk = 0;
 static const char *filename;
 static tensorstore::TensorStore<> store;
 static int show_errors = 0;
-
-
+static int dim1=0;
+static int dim2=0;
+static int level=0;
+static int num_th=1;
+static int shape0=0;
+static int shape1=0;
 static int process_args(int argi, int argc, char *argv[]) {
     const MACSIO_CLARGS_ArgvFlags_t argFlags = {MACSIO_CLARGS_WARN, MACSIO_CLARGS_TOMEM};
 
@@ -68,258 +136,141 @@ static int process_args(int argi, int argc, char *argv[]) {
         "--show_errors", "",
             "Show TensorStore errors",
             &show_errors,
+	    "--compression_level %d","",
+	    "level of compression with gzip",
+	    &level,
+	    "--chunk_size %d %d","",
+	    "size of the chunks",
+	    &dim1,&dim2,
+	    "--num_threads %d","",
+	    "number of threads for writing",
+	    &num_th,
+	    "--dims %d %d","",
+	    "dimension of data",
+	    &shape0,&shape1,
            MACSIO_CLARGS_END_OF_ARGS);
 
     return 0;
 }
-/*
-static void *CreateMyFile(
-		const char *fname,
-		const char *nsname,
-		void *userdata){
-	::nlohmann::json json_spec = GetJsonSpec();
-auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode:open, tensorstore::ReadWriteMode::read_write);
-return (void *) store_result;
-}
-
-static void *OpenMyFile( 
-		const char *fname,
-		const char *nsname,
-		MACSIO_MIF_ioFlags_t ioFlags,
-		 void *userdata){
-	::nlohmann::json json_spec = GetJsonSpec();
-auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode:open, tensorstore::ReadWriteMode:read_write);	
-return (void *) store_result;
-*/
-static void main_dump(int argi, int argc, char **argv, json_object *main_obj, int dumpn, double dumpt) {
-MACSIO_TIMING_GroupMask_t main_dump_sif_grp = MACSIO_TIMING_GroupMask("main_dump_sif");
-MACSIO_TIMING_TimerId_t main_dump_sif_tid;
-double timer_dt;
-    char fileName[256];
- sprintf(fileName, "zarr_%03d",dumpn);
-       	::nlohmann::json json_spec = GetJsonSpec(fileName);
- auto context = Context::Default();
-        
- 
+//create tensorstore file
+static auto CreateFile( std::vector<int> shape){
+	//::nlohmann::json json_spec=GetJsonSpec2(path,shape,chunksize,num_th);
+	/*
+	if(level==0)
+	 json_spec = GetJsonSpec(path,shape,chunksize,num_th);
+	else
+	 json_spec = GetJsonSpec(path,shape,chunksize,num_th,level);
+	*/
+	 //assert(json_spec.empty());
 	
-  // Create the store.
- main_dump_sif_tid = MT_StartTimer("H5Sselect_hyperslab", main_dump_sif_grp, dumpn);
- auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode::create |tensorstore::OpenMode::open, tensorstore::ReadWriteMode::read_write).result();
- timer_dt = MT_StopTimer(main_dump_sif_tid); 
- if (!store_result.ok()) {
-    std::cerr << "Failed to create store: " << store_result.status() << std::endl;
-  }
-  auto store = *store_result;
- 
-//try to write only 1 dataset
+auto store_result = tensorstore::Open(GetJsonSpec(shape), context, tensorstore::OpenMode::create, tensorstore::ReadWriteMode::read_write);
+return store_result;
+}
+//open the tensorstore, not applicant yet
+/*
+static auto OpenFile( const char* path,const std::vector<int> shape, const std::vector<int> chunksize){
+::nlohmann::json json_spec;
+	json_spec = GetJsonSpec(path,shape,chunksize,num_th);
+	auto store_result = tensorstore::Open(json_spec, context, tensorstore::OpenMode::open, tensorstore::ReadWriteMode::read_write);	
+return store_result;
+}
+*/
+std::vector<double> copy_array(double *source, unsigned long long length) {
+	std::vector<double> destination(length);
+    std::memcpy(destination.data(), source, length * sizeof(double));
+    return destination;
+}
+/*
+//create zarr file 
+static auto createdata2(json_object *main_obj, int i, std::vector<int> shape){
+//this lines gets the data from json and save it to a array	
 json_object *part_array = json_object_path_get_array(main_obj, "problem/parts");
-json_object *part_obj = json_object_array_get_idx(part_array, 0);
+json_object *part_obj = json_object_array_get_idx(part_array, 1);
 json_object *vars_array = json_object_path_get_array(part_obj, "Vars");
 json_object *var_obj = json_object_array_get_idx(vars_array, 0);
 json_object *extarr_obj = json_object_path_get_extarr(var_obj, "data");
-const char *json_str1 = json_object_to_json_string(extarr_obj );
-std::cerr<<"data0: "<<json_str1[0]<<std::endl;
-int array_size = json_object_array_length(var_obj);
-    std::cout << "JSON array size: " << array_size << std::endl;
+double *valdp;
+valdp = (double *) json_object_extarr_data(extarr_obj);
+unsigned long long leng=shape[0]*shape[1];
+std::vector<double> vec(valdp, valdp + leng);
+auto array2=tensorstore::Array(vec, {shape[0]-1,shape[1]-1}, tensorstore::c_order);
+std::vector<double> result =copy_array(valdp, leng);
+const Index rows[2] = {shape[0]-1,shape[1]-1};
+const Index cols = shape[1]-1;
+//auto array = tensorstore::MakeArray<double>(result);
+return array2;
+}*/
+//create data directly
 
-	std::vector<int16_t> parsed_data;
-	    std::istringstream iss(json_str1);
-	        char ch;
-		    int value;
-		    while (iss >> ch) {
-			            if (std::isdigit(ch) || (ch == '-' && std::isdigit(iss.peek()))) {
-					                iss.putback(ch);
-							            iss >> value;
-								                parsed_data.push_back(static_cast<int16_t>(value));
-										        }
-				        }
-		    std::cout << "parsed_size: " << parsed_data.size() << std::endl;
-		    std::vector<int16_t> data_to_use(parsed_data.begin() + 4, parsed_data.end());
-		     const tensorstore::Index rows = 99;
-		     const tensorstore::Index cols = 99;
-auto array = tensorstore::AllocateArray<int16_t>({rows,cols});
-for (tensorstore::Index i = 0; i < rows; ++i) {
-        for (tensorstore::Index j = 0; j < cols; ++j) {
-            array(i, j) = data_to_use[i * cols + j];
+static auto createdata2(json_object *main_obj, int type,std::vector<int> shape){
+const Index rows = 32768;
+const Index cols = 16384;
+auto array=tensorstore::AllocateArray<double>({rows,cols});
+
+if (type==0){
+for (Index i=0; i<rows;i++)
+	for(Index j=0;j<cols;j++)
+		array(i,j)=1.0;
+}
+
+
+return array;
+}
+
+//get the shape from data created by driver
+static auto getshape(json_object *main_obj){
+std::vector<int> shape;
+json_object *global_log_dims_array = json_object_path_get_array(main_obj, "problem/global/LogDims");
+ int array_len = json_object_array_length(global_log_dims_array);
+for (int i = 0; i < array_len; ++i) {
+            struct json_object *element_obj = json_object_array_get_idx(global_log_dims_array, i);
+            int element_value = json_object_get_int(element_obj);
+            shape.push_back(element_value-1);
         }
-    }
- main_dump_sif_tid = MT_StartTimer("ZARRwrite", main_dump_sif_grp, dumpn);
-auto write_result = tensorstore::Write(array, store).result();
-timer_dt = MT_StopTimer(main_dump_sif_tid);
-if (!write_result.ok()) {std::cerr << "Error writing to TensorStore:";}
-
-main_dump_sif_tid = MT_StartTimer("ZARRREAD", main_dump_sif_grp, dumpn);
-auto read_result = tensorstore::Read(store).result();
-timer_dt = MT_StopTimer(main_dump_sif_tid);
-
-auto dynamic_array = read_result.value();
-auto rank_cast_array = tensorstore::StaticRankCast<2>(dynamic_array).value();
-    auto typed_array = tensorstore::StaticDataTypeCast<int16_t>(rank_cast_array).value();
-/*
-std::cout << "Data read from TensorStore:\n";
-	        for (tensorstore::Index i = 0; i < rows; ++i) {
-			        for (tensorstore::Index j = 0; j < cols; ++j) {
-					            std::cout << typed_array(i, j)<< " ";
-						            }
-				        std::cout << std::endl;
-					    }
-		/*
-auto read_array = tensorstore::Read(store).value();
-
-	    std::cout << "Data read from TensorStore:\n";
-	        for (tensorstore::Index i = 0; i < rows; ++i) {
-			        for (tensorstore::Index j = 0; j < cols; ++j) {
-					read_array(tensorstore::Index(i), tensorstore::Index(j)) << " ";
-             }					
-			       	}
-				        std::cout << std::endl;
-					    }
-
-/*
-for (tensorstore::Index i = 0; i < parsed_data.size(); ++i) { 
-	std::cout <<array(i);}
-printf("\n");
-
-
-		    /*
-		    auto array = tensorstore::MakeArray<int16_t>(parsed_data);
-		auto spec = tensorstore::Spec::FromJson({
-				        {"driver", "zarr"},
-					        {"kvstore", {{"driver", "memory"}}},
-						        {"metadata", {
-							            {"dtype", "<i2"},
-								                {"shape", {parsed_data.size()}}
-										        }}
-											    }).value();
-
-
-		auto store_result = tensorstore::Open(spec, context, tensorstore::OpenMode::create).result();
-		tensorstore::TensorStore<int16_t> store = store_result.value();
-		auto write_result = tensorstore::Write(array, store).result();
-		if (!write_result.ok()) {std::cerr << "Error writing to TensorStore: " ;}
-
-
-    /*
-    int16_t* parsed_data = NULL;
-    size_t count = 0;
-    size_t capacity = 1000; 
-    parsed_data = (int16_t*)malloc(capacity * sizeof(int16_t));
-    const char* ptr = json_str1;
-   while (*ptr != '\0') {
-	   if (isdigit(*ptr) || (*ptr == '-' && isdigit(*(ptr + 1)))) {
-		  if (count >= capacity) {
-			  capacity += 100;
-			 int16_t* new_data = (int16_t*)realloc(parsed_data, capacity * sizeof(int16_t));
-			if (!new_data) {
-		       		free(parsed_data);	       
-    				}
-			parsed_data = new_data;}
-		  parsed_data[count++] = (int16_t)strtol(ptr, (char**)&ptr, 10);
-		   } else {
-			               ++ptr;
-				               }
-	       }
-for (size_t i = 0; i < count; ++i) {
-	        printf("%d ", parsed_data[i]);
-		    }
-printf("\n");
-   tensorstore::Array<int16_t,1> array(parsed_data.data(),{parsed_data.size()});
-   auto write_result = tensorstore::Write(array, store).result();
-   if (!write_result.ok()) {
-	               std::cerr << "Error writing to TensorStore: " ;}
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    /*
-	int16_t parsed_data[];
-        std::istringstream iss(json_str1);
-        char ch;
-	int value;
-	while (iss >> ch) {
-		if (std::isdigit(ch) || (ch == '-' && std::isdigit(iss.peek()))) {
-		            iss.putback(ch);
-  	                iss >> value;
-			parsed_data.push_back(static_cast<int16_t>(value));
-			            }
-			    }
-
-auto array = tensorstore::MakeArray(parsed_data);
-auto write_result = tensorstore::Write(array, store).result();
-if (!write_result.ok()) {
-	        std::cerr << "Error writing to TensorStore: ";}
-/*
-std::vector<int> parsed_data;
-    int value;
-        const char* ptr = json_str1;
-	    while (*ptr != '\0') {
-		            if (std::isdigit(*ptr) || (*ptr == '-' && std::isdigit(*(ptr + 1)))) {
-				                if (sscanf(ptr, "%d", &value) == 1) {
-							                parsed_data.push_back(value);
-									            }
-						            while (std::isdigit(*ptr) || *ptr == '-') {
-								                    ++ptr;
-										                }
-							            } else {
-									                ++ptr;
-											        }
-			        }
-auto write_result = tensorstore::Write( tensorstore::MakeArray<int16_t>(parsed_data), store).result();
-
-if (!write_result.ok()) {
-	  std::cerr << "Error writing data to TensorStore: " << write_result.status() << std::endl;
-} else {
-	  std::cout << "Data written to TensorStore successfully!" << std::endl;
+return shape;
 }
+
+static void main_dump(int argi, int argc, char **argv, json_object *main_obj, int dumpn, double dumpt) {
+//timings
+MACSIO_TIMING_GroupMask_t main_dump_sif_grp = MACSIO_TIMING_GroupMask("main_dump_sif");
+MACSIO_TIMING_TimerId_t main_dump_sif_tid;
+MACSIO_TIMING_TimerId_t whole_timer;
+double timer_dt;
+double timer_dt2;
+
+process_args(argi, argc, argv);
+whole_timer=MT_StartTimer("whole_time", main_dump_sif_grp, dumpn);
+
+//creating the metadata
+char fileName[256];
+std::vector<int> chunksize={dim1,dim2};
+sprintf(fileName, "zarr_%03d",dumpn);
+//auto shape= getshape(main_obj);
+std::vector<int> shape={32768,16384};
+main_dump_sif_tid = MT_StartTimer("Zarr_create_time", main_dump_sif_grp, dumpn);
+auto create=CreateFile(shape).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid);
+//time to create zarr array
+main_dump_sif_tid = MT_StartTimer("data_create_time", main_dump_sif_grp, dumpn);
+auto data=createdata2(main_obj,0,shape);
+timer_dt = MT_StopTimer(main_dump_sif_tid);
 /*
-const char *json_str1 = json_object_to_json_string(extarr_obj );
-    std::cerr<<"data: "<<json_str1<<std::endl;
-json_object *part_obj = json_object_array_get_idx(part_array, 0);
-void const *buf = 0;
-json_object *orstore::MakeArray<int16_t>({{1, 2, 3}, {4, 5, 6}}),ars_array = json_object_path_get_array(part_obj, "Vars");
-json_object *var_obj = json_object_array_get_idx(vars_array, 0);
-json_object *extarr_obj = json_object_path_get_extarr(var_obj, "data");
-buf = json_object_extarr_data(extarr_obj);
+//timing for creating the zarr file
+main_dump_sif_tid = MT_StartTimer("Zarr_create_time", main_dump_sif_grp, dumpn);
+auto create=CreateFile(fileName,shape,shape).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid); 
+*/
+//timing for writing to zarr
+ main_dump_sif_tid = MT_StartTimer("Zarr_write_time", main_dump_sif_grp, dumpn);
+ auto write_result = tensorstore::Write(data,create).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid); 
+timer_dt2 = MT_StopTimer(whole_timer);
 
-const char *json_str1 = json_object_to_json_string(buf );
-    std::cerr<<"buf: "<<json_str1<<std::endl;
-
-
-  
-  // Write to the store.
-  auto write_result = tensorstore::Write(
-      tensorstore::MakeArray<int16_t>({{1, 2, 3}, {4, 5, 6}}),
-      store | tensorstore::AllDims().TranslateSizedInterval({9, 8}, {2, 3})).result();
-
-  if (!write_result.ok()) {
+if (!write_result.ok()) {
     std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
-  }
-
-  // Read from the store.
-  auto read_result = tensorstore::Read<tensorstore::zero_origin>(
-      store | tensorstore::AllDims().TranslateSizedInterval({9, 7}, {3, 5})).result();
-
-  if (!read_result.ok()) {
-    std::cerr << "Failed to read from store: " << read_result.status() << std::endl;
-  }
-
-  // Print the read result.
-  auto array = *read_result;
-  for (const auto& row : array) {
-    for (const auto& elem : row) {
-      std::cout << elem << " ";
-    }
-    std::cout << std::endl;
-  }*/
 }
-
+else std::cerr << "succesful write "; 
+}
 static int register_this_interface() {
     MACSIO_IFACE_Handle_t iface;
 
