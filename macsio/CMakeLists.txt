@@ -21,7 +21,9 @@ SET(mio_srcs
 #
 SET_SOURCE_FILES_PROPERTIES(${mio_srcs} PROPERTIES LANGUAGE CXX)
 SET_SOURCE_FILES_PROPERTIES(${PLUGIN_SRCS} PROPERTIES LANGUAGE CXX)
-
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")
 ADD_EXECUTABLE(macsio ${mio_srcs} ${PLUGIN_SRCS})
 ADD_EXECUTABLE(tstlog tstlog.c macsio_log.c)
 ADD_EXECUTABLE(tsttiming tsttiming.c macsio_timing.c macsio_log.c macsio_utils.c)

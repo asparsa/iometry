@@ -1,7 +1,7 @@
 # Header files need not be enumerated
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
-LIST(APPEND plugin_srcs ${PROJECT_SOURCE_DIR}/plugins/macsio_miftmpl.c)
+#LIST(APPEND plugin_srcs ${PROJECT_SOURCE_DIR}/plugins/macsio_miftmpl.c)
 
 IF(ENABLE_HDF5_PLUGIN)
     LIST(APPEND plugin_srcs ${PROJECT_SOURCE_DIR}/plugins/macsio_hdf5.c)

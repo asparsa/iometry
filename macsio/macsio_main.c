@@ -332,7 +332,9 @@ static json_object *ProcessCommandLine(int argc, char *argv[], int *plugin_argi)
             "Extension of generated file(s).",
         "--read_path %s", MACSIO_CLARGS_NODEFAULT,
             "Specify a path name (file or dir) to start reading for a read test.",
-        "--num_loads %d", MACSIO_CLARGS_NODEFAULT,
+        "--write_path %s", MACSIO_CLARGS_NODEFAULT,
+            "Specify a path name (file or dir) to start writing for a write test.",
+	"--num_loads %d", MACSIO_CLARGS_NODEFAULT,
             "Number of loads in succession to test.",
         "--no_validate_read", "",
             "Don't validate data on read.",
@@ -532,8 +534,10 @@ main_write(int argi, int argc, char **argv, json_object *main_obj)
                 /* do the dump */
                 //MACSIO_BurstDump(dt);
 
-                
-                (*(iface->dumpFunc))(argi, argc, argv, main_obj, dumpNum, dumpTime);
+               if (strcmp(JsonGetStr(main_obj, "clargs/write_path"),"null"))
+		(*(iface->dumpFunc))(argi, argc, argv, main_obj, dumpNum, dumpTime,"");
+		else 
+                (*(iface->dumpFunc))(argi, argc, argv, main_obj, dumpNum, dumpTime,JsonGetStr(main_obj, "clargs/write_path"));
 #ifdef HAVE_MPI
                 mpi_errno = 0;
 #endif
@@ -641,7 +645,7 @@ main_read(int argi, int argc, char **argv, json_object *main_obj)
 
         /* do the load */
         (*(iface->loadFunc))(argi, argc, argv,
-            JsonGetStr(main_obj, "clargs/read_path"), main_obj, &data_read_obj);
+            JsonGetStr(main_obj, "clargs/read_path"), main_obj, loadNum);
 
         /* stop timer */
         MT_StopTimer(heavy_load_tid);

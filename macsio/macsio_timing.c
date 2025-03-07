@@ -190,9 +190,14 @@ typedef struct _timerInfo_t
     double running_var;              /**< Running variance of timer iterations */
     double start_time;               /**< Time at which current iteration of this timer was started */
     double total_time_this_iter;     /**< Cummulative time spent in the current iteration (for restarts) */
-
+    double finish_time;
     MACSIO_TIMING_GroupMask_t gmask; /**< User defined bit mask for group membership of this timer. */
-
+    double each[32];
+    double stress[10001];
+    int filecount=0;
+    double q1;
+    double q3;
+    double median;
     char __file__[32];               /**< Source file name for StartTimer call */
     char label[64];                  /**< User defined label given to the timer */
 } timerInfo_t;
@@ -252,7 +257,7 @@ MACSIO_TIMING_TimerId_t MACSIO_TIMING_StartTimer(
             timerHashTable[tid].iter_num = iter_num;
             timerHashTable[tid].total_time_this_iter = 0;
             timerHashTable[tid].is_restart = 0;
-
+		timerHashTable[tid].finish_time=0;
             timerHashTable[tid].depth = 0;
             timerHashTable[tid].start_time = get_current_time();
 
@@ -314,8 +319,11 @@ double MACSIO_TIMING_StopTimer(MACSIO_TIMING_TimerId_t tid)
 {
     double stop_time = get_current_time();
     double timer_time = stop_time - timerHashTable[tid].start_time;
-
-    if (tid >= MACSIO_TIMING_HASH_TABLE_SIZE) return DBL_MAX;
+timerHashTable[tid].finish_time = get_current_time();
+timerHashTable[tid].each[timerHashTable[tid].iter_num]=timer_time;
+//timerHashTable[tid].stress[timerHashTable[tid].filecounter]=timer_time;
+//printf("iter_num=%d, iter_count=%d ",timerHashTable[tid].iter_num,timerHashTable[tid].iter_count);
+if (tid >= MACSIO_TIMING_HASH_TABLE_SIZE) return DBL_MAX;
 
 #ifdef HAVE_CALIPER
     cali_end(caliperAttributeInfo[tid].attr);
@@ -449,6 +457,7 @@ clear_timers(timerInfo_t *table, MACSIO_TIMING_GroupMask_t gmask)
         table[i].is_restart = 0;
         table[i].depth = 0;
         table[i].start_time = 0;
+	//table[i].filecounter=0;
     }
 }
 
@@ -615,6 +624,13 @@ MACSIO_TIMING_ReduceTimers(
         timerinfo_mpi_type, timerinfo_reduce_op, root, comm);
 #endif
 }
+int compare(const void *a, const void *b) {
+    double epsilon = 1e-9;
+    double diff = (*(double *)a - *(double *)b);
+    if (diff < -epsilon) return -1; // a is smaller
+    if (diff > epsilon) return 1;   // a is larger
+    return 0;                       // almost equal
+}
 
 static void
 dump_timers_to_strings(
@@ -628,7 +644,6 @@ dump_timers_to_strings(
     char **_strs;
     int pass, _nstrs, _maxlen = 0;
     int const max_str_size = 1024;
-
     for (pass = 0; pass < 2; pass++)
     {
         int i;
@@ -636,10 +651,18 @@ dump_timers_to_strings(
         _nstrs = 0;
         for (i = 0; i < MACSIO_TIMING_HASH_TABLE_SIZE; i++)
         {
+		double op[table[i].iter_count];
+		for( int l=0;l<table[i].iter_count;l++){
+		op[l]=table[i].each[l];
+		}
+		size_t qsize = sizeof(op) / sizeof(op[0]);
+		qsort(op, qsize, sizeof(double), compare);
+		//if (op[0]!=0)for( int l=0;l<table[i].iter_count;l++)printf("op[%d]=%8.5f ",l,op[l]);
+		//if (op[0]!=0) printf("\n");
             int len;
             double min_in_stddev_steps_from_mean = 0, max_in_stddev_steps_from_mean = 0;
             double dev;
-
+		
             if (!strlen(table[i].label)) continue;
 
             if (!(table[i].gmask & gmask)) continue;
@@ -655,19 +678,38 @@ dump_timers_to_strings(
                 min_in_stddev_steps_from_mean = (table[i].running_mean - table[i].min_time) / dev;
                 max_in_stddev_steps_from_mean = (table[i].max_time - table[i].running_mean) / dev;
             }
-
+	double pos = (table[i].iter_count ) / 4.0;
+	double q1,q3,median;
+	int lower_index = (int)pos - 1;
+	int upper_index = lower_index + 1;
+	double fraction = pos - (int)pos;
+	//printf("q1=%8.5f ",op[lower_index]);
+	 q1= op[lower_index];
+	pos = 3* (table[i].iter_count) / 4.0;
+        lower_index = (int)pos - 1;
+        upper_index = lower_index + 1;
+        fraction = pos - (int)pos;
+         q3= op[lower_index];
+	 //printf("q3=%8.5f ",op[lower_index]);
+	pos = (table[i].iter_count) / 2.0;
+	lower_index = (int)pos ;
+        upper_index = lower_index + 1;
+	fraction = pos - (int)pos;
+	 median=(op[lower_index]);	 
 //#warning USE COLUMN HEADINGS INSTEAD
 //#warning HANDLE INDENTATION HERE
             len = snprintf(_strs[_nstrs-1], max_str_size,
-                "TOT=%10.5f,CNT=%04d,MIN=%8.5f(%4.2f):%06d,AVG=%8.5f,MAX=%8.5f(%4.2f):%06d,DEV=%8.8f:FILE=%s:LINE=%d:LAB=%s",
+                "TOT=%10.5f,CNT=%04d,MIN=%8.5f(%4.2f):%06d,AVG=%8.5f,DEV=%8.8f,Q1=%8.5f,MEDIAN=%8.5f,Q3=%8.5f,MAX=%8.5f(%4.2f):%06d,FILE=%s::LAB=%s",
                 table[i].total_time,
                 table[i].iter_count,
                 table[i].min_time, min_in_stddev_steps_from_mean, table[i].min_rank,
                 table[i].running_mean,
-                table[i].max_time, max_in_stddev_steps_from_mean, table[i].max_rank,
                 dev,
+		q1,
+		median,
+		q3,
+		table[i].max_time, max_in_stddev_steps_from_mean, table[i].max_rank,
                 table[i].__file__,
-                table[i].__line__,
                 table[i].label);
 
             if (len > _maxlen) _maxlen = len;

@@ -42,28 +42,31 @@ std::string Bytes(std::vector<unsigned char> values) {
 }
 
 
-static char const *iface_name = "tensorstore";
-static char const *iface_ext = "tstore";
+static char const *iface_name = "zarr";
+static char const *iface_ext = "zarr";
 
 static int use_log = 0;
 static int no_collective = 0;
 static int no_single_chunk = 0;
 static const char *filename;
-static tensorstore::TensorStore<> store;
+//static tensorstore::TensorStore<> store;
 static int show_errors = 0;
 ::nlohmann::json GetJsonSpec(const char* path,const int* shape,const char* dtype,const int* chunks){
 	  return {
-		  {"driver", "zarr"},
-  	          {"kvstore", {{"driver", "memory"}, {"path", path}}},
+		  {"driver", "zarri3"},
+  	          {"kvstore", {{"driver", "file"}, {"path", path}}},
                   {"metadata",
 	           {
-	              {"compressor", {{"id", "blosc"}}},
-	                 {"dtype", dtype},
+	                 {"data_type", dtype},
    		            {"shape", shape},
-		               {"chunks", chunks},
-			              }},
+			    {"configuration", {
+                    {"chunk_shape", shape}
+                }}
+	  	   }}
+
 	     };
 }
+
 static int process_args(int argi, int argc, char *argv[]) {
     const MACSIO_CLARGS_ArgvFlags_t argFlags = {MACSIO_CLARGS_WARN, MACSIO_CLARGS_TOMEM};
 
@@ -83,40 +86,6 @@ static auto create_zarr( const char* filename,const int* shape, const char* dtyp
 }
 
 
-static void main_dump_sif(
-    json_object *main_obj, /**< main json data object to dump */
-    int dumpn, /**< dump number (like a cycle number) */
-    double dumpt /**< dump time */
-){
-    MACSIO_TIMING_GroupMask_t main_dump_sif_grp = MACSIO_TIMING_GroupMask("main_dump_sif");
-    MACSIO_TIMING_TimerId_t main_dump_sif_tid;
-    double timer_dt;
-
-
-    int ndims;
-    int i, v, p;
-    char const *mesh_type = json_object_path_get_string(main_obj, "clargs/part_type");
-    char fileName[256];
-    int use_part_count;
-
-    tensorstore::Context context = tensorstore::Context::Default();
-    tensorstore::Result<tensorstore::TensorStore<>> store_result;
-
-    //add parallel part later
-
-    sprintf(fileName, "%s_hdf5_%03d",
-        json_object_path_get_string(main_obj, "clargs/filebase"),
-        dumpn);
-    MACSIO_UTILS_RecordOutputFiles(dumpn, fileName);
-    main_dump_sif_tid = MT_StartTimer("ZARRFcreate", main_dump_sif_grp, dumpn);
-    //store_result=create_zarr(fileName,);
-    timer_dt = MT_StopTimer(main_dump_sif_tid); 
-
-    json_object *part_array = json_object_path_get_array(main_obj, "problem/parts");
-    json_object *first_part_obj = json_object_array_get_idx(part_array, 0);
-    json_object *first_part_vars_array = json_object_path_get_array(first_part_obj, "Vars");
-}
-
 
 static void main_dump(
     int argi, /**< arg index at which to start processing \c argv */
@@ -132,15 +101,10 @@ static void main_dump(
 
     int rank, size, numFiles;
 
-    #ifdef HAVE_MPI
-    mpi_errno = MPI_Barrier(MACSIO_MAIN_Comm);
-    #endif
-
     process_args(argi, argc, argv);
 
-    rank = json_object_path_get_int(main_obj, "parallel/mpi_rank");
-    size = json_object_path_get_int(main_obj, "parallel/mpi_size");
 
+    rank = json_object_path_get_int(main_obj, "parallel/mpi_rank");
     json_object *parfmode_obj = json_object_path_get_array(main_obj, "clargs/parallel_file_mode");
     const char *json_str1 = json_object_to_json_string(parfmode_obj );
     std::cerr<<"parfmode_obj: "<<json_str1<<std::endl;

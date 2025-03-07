@@ -10,9 +10,12 @@ SET(MACSIO_PATCH_VERSION 0)
 SET(MACSIO_VERSION
     "${MACSIO_MAJOR_VERSION}.${MACSIO_MINOR_VERSION}.${MACSIO_PATCH_VERSION}")
 
-IF(NOT CMAKE_BUILD_TYPE) 
-    SET(CMAKE_BUILD_TYPE Release)
-ENDIF(NOT CMAKE_BUILD_TYPE)
+##set(CMAKE_BUILD_TYPE Debug)
+##set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+##set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
+## Linker flags
+##set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
 
 LIST(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -69,8 +72,7 @@ IF(ENABLE_ZARR_PLUGIN)
 
 FetchContent_Declare(
   tensorstore
-  GIT_REPOSITORY https://github.com/google/tensorstore.git
-  GIT_TAG master
+  URL https://github.com/google/tensorstore/archive/refs/tags/v0.1.63.tar.gz
 )
 
 FetchContent_MakeAvailable(tensorstore)

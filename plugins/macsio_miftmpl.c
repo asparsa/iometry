@@ -206,6 +206,7 @@ static void main_dump(
     int dumpn,              /**< [in] The number/index of this dump. Each dump in a sequence gets a unique,
                                       monotone increasing index starting from 0 */
     double dumpt            /**< [in] The time to be associated with this dump (like a simulation's time) */
+
 )
 {
     int i, rank, numFiles;

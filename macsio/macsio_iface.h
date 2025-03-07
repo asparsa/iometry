@@ -54,7 +54,8 @@ typedef void (*DumpFunc)(
     char **argv, /**< [in] \c argv from main */
     json_object *main_obj, /**< [in] the main json data object to be dumped */
     int dumpNum, /**< [in] like a "cycle number" for the dump */
-    double dumpTime /**< [in] like "time" for the dump */
+    double dumpTime, /**< [in] like "time" for the dump */
+    char const *path
 );
 
 /*! \brief Main mesh+field load (read) function specification */
@@ -64,7 +65,7 @@ typedef void (*LoadFunc)(
     char **argv, /**< [in] \c argv from main */
     char const *path, /**< [in] file(s) to read data from */
     json_object *main_obj,
-    json_object **data_read_obj /**< [out] returned data object read by the plugin */
+    int loadnumber /**< [out] returned data object read by the plugin */
 );
 
 /*! \brief Command-line argument processing function for plugin */
