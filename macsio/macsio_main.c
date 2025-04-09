@@ -387,13 +387,15 @@ write_timings_file(char const *filename)
     MACSIO_LOG_LogHandle_t *timing_log;
 
     MACSIO_TIMING_DumpTimersToStrings(MACSIO_TIMING_ALL_GROUPS, &timer_strs, &ntimers, &maxlen);
-    MACSIO_TIMING_ReduceTimers(MACSIO_MAIN_Comm, 0);
+    
+	MACSIO_TIMING_ReduceTimers(MACSIO_MAIN_Comm, 0);
     if (MACSIO_MAIN_Rank == 0)
         MACSIO_TIMING_DumpReducedTimersToStrings(MACSIO_TIMING_ALL_GROUPS, &rtimer_strs, &rntimers, &rmaxlen);
     rdata[0] = maxlen > rmaxlen ? maxlen : rmaxlen;
     rdata[1] = ntimers;
     rdata[2] = rntimers;
     memcpy(rdata_out, rdata, sizeof(rdata));
+
 #ifdef HAVE_MPI
     MPI_Allreduce(rdata, rdata_out, 3, MPI_INT, MPI_MAX, MACSIO_MAIN_Comm);
 #endif
@@ -410,7 +412,7 @@ write_timings_file(char const *filename)
     }
     free(timer_strs);
 
-    /* dump MPI reduced timers */
+    /* dump MPI reduced timers 
     if (MACSIO_MAIN_Rank == 0)
     {
         MACSIO_LOG_LogMsg(timing_log, "Reduced Timers...");
@@ -423,7 +425,7 @@ write_timings_file(char const *filename)
         }
         free(rtimer_strs);
     }
-
+*/
     MACSIO_LOG_LogFinalize(timing_log);
 }
 
