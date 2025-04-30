@@ -372,7 +372,7 @@ static void main_read_hyper(const char* path,json_object *main_obj, int loadnumb
         //auto read_result = randomread.result();
         auto result2=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                { 10,10,10}, { 760,760,760}))
+                                {1000, 1000}, {20968, 20968}))
                     .value();
         timer_dt = MT_StopTimer(main_read_full_tid);
 	
@@ -420,19 +420,19 @@ auto result5=tensorstore::Read<tensorstore::zero_origin>(
         //auto read_result = randomread.result();
         auto result2=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {10,10,10}, {380,380,380}))
+                                {100,100}, {10484,10484}))
                     .value();
         auto result13=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {10,300,10}, {380,380,380}))
+                                {15000, 100}, {10484,10484}))
                     .value();
 auto result12=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {10,10,300 }, { 380,380,380}))
+                                {100, 15000}, {10484, 10484}))
                     .value();
 auto result11=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {300,300,10}, { 380,380,380}))
+                                {15000, 15000}, {10484, 10484}))
                     .value();
 	timer_dt = MT_StopTimer(main_read_full_tid);
      }    
@@ -475,19 +475,19 @@ auto result5=tensorstore::Read<tensorstore::zero_origin>(
         //auto read_result = randomread.result();
         auto result2=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                             	{10,10,10}, {380,380,380}))
+                                {9000, 9000}, {10484,10484}))
                     .value();
         auto result13=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {200,200,200}, {380,380,380}))
+                                {15000, 15000}, {10484,10484}))
                     .value();
 auto result12=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {400,400,400}, {380,380,380}))
+                                {15000, 9000}, {10484,10484}))
                     .value();
 auto result11=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {600,600,600}, {380,380,380}))
+                                {15000, 9000}, {10484,10484}))
                     .value();
         timer_dt = MT_StopTimer(main_read_full_tid);
      }
@@ -524,20 +524,18 @@ timer_dt= MT_StopTimer(main_read_full_tid);
 else{
 	int arr[16384];
         int arr2[16384];
-	int arr3[16384];
-        for(int i=0;i<4096;i++){
-        arr[i]=rand()%1024;
-        arr2[i]=rand()%1024;
-	arr3[i]=rand()%1024;
+        for(int i=0;i<16384;i++){
+        arr[i]=rand()%16384;
+        arr2[i]=rand()%16384;
 }
         auto result=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {100,100,100}, {1,1,1})).value();
+                                {100, 100}, {1,1})).value();
         main_read_full_tid = MT_StartTimer("read_data_small", main_read_full_grp, loadnumber);
-        for (int i = 0; i < 4096; i++) {
+        for (int i = 0; i < 8000; i++) {
         result=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
-                                {arr[i],arr2[i],arr[i]}, {1,1,1})).value();
+                                {arr[i],arr2[i]}, {1,1})).value();
 }
 timer_dt= MT_StopTimer(main_read_full_tid);
 }

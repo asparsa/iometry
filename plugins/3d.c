@@ -525,7 +525,7 @@ else{
 	int arr[16384];
         int arr2[16384];
 	int arr3[16384];
-        for(int i=0;i<4096;i++){
+        for(int i=0;i<16384;i++){
         arr[i]=rand()%1024;
         arr2[i]=rand()%1024;
 	arr3[i]=rand()%1024;
@@ -534,7 +534,7 @@ else{
                     store | tensorstore::AllDims().TranslateSizedInterval(
                                 {100,100,100}, {1,1,1})).value();
         main_read_full_tid = MT_StartTimer("read_data_small", main_read_full_grp, loadnumber);
-        for (int i = 0; i < 4096; i++) {
+        for (int i = 0; i < 32684; i++) {
         result=tensorstore::Read<tensorstore::zero_origin>(
                     store | tensorstore::AllDims().TranslateSizedInterval(
                                 {arr[i],arr2[i],arr[i]}, {1,1,1})).value();
