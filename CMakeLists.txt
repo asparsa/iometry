@@ -72,7 +72,7 @@ IF(ENABLE_ZARR_PLUGIN)
 
 FetchContent_Declare(
   tensorstore
-  URL https://github.com/google/tensorstore/archive/refs/tags/v0.1.63.tar.gz
+  URL https://github.com/google/tensorstore/archive/refs/tags/v0.1.74.tar.gz
 )
 
 FetchContent_MakeAvailable(tensorstore)
