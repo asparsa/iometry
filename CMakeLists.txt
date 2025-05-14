@@ -1,14 +1,14 @@
-PROJECT(MACSIO)
+PROJECT(IOmetry)
 
 CMAKE_MINIMUM_REQUIRED(VERSION 2.20.2)
 
 ENABLE_TESTING()
 
-SET(MACSIO_MAJOR_VERSION 1)
-SET(MACSIO_MINOR_VERSION 1)
-SET(MACSIO_PATCH_VERSION 0)
-SET(MACSIO_VERSION
-    "${MACSIO_MAJOR_VERSION}.${MACSIO_MINOR_VERSION}.${MACSIO_PATCH_VERSION}")
+SET(IOmetry_MAJOR_VERSION 1)
+SET(IOmetry_MINOR_VERSION 1)
+SET(IOmetry_PATCH_VERSION 0)
+SET(IOmetry_VERSION
+    "${IOmetry_MAJOR_VERSION}.${IOmetry_MINOR_VERSION}.${IOmetry_PATCH_VERSION}")
 
 ##set(CMAKE_BUILD_TYPE Debug)
 ##set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
@@ -21,6 +21,7 @@ LIST(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 ## JSON-CWX
 FIND_PACKAGE(JSON-CWX REQUIRED)
+
 INCLUDE_DIRECTORIES(${JSON-CWX_INCLUDE_DIRS})
 LIST(APPEND MIO_EXTERNAL_LIBS ${JSON-CWX_LIBRARIES})
 
@@ -72,12 +73,16 @@ IF(ENABLE_ZARR_PLUGIN)
 
 FetchContent_Declare(
   tensorstore
-  URL https://github.com/google/tensorstore/archive/refs/tags/v0.1.63.tar.gz
+  URL "https://github.com/google/tensorstore/archive/refs/tags/v0.1.74.tar.gz"
 )
 
 FetchContent_MakeAvailable(tensorstore)
- LIST(APPEND MIO_EXTERNAL_LIBS tensorstore::tensorstore tensorstore::all_drivers)
- ADD_DEFINITIONS(-DHAVE_TENSORSTORE)
+LIST(APPEND MIO_EXTERNAL_LIBS tensorstore::tensorstore 
+			      tensorstore::driver_zarr
+			      tensorstore::driver_zarr3
+			      tensorstore::kvstore_file
+			      	tensorstore::driver_array)
+ADD_DEFINITIONS(-DHAVE_TENSORSTORE)
 # Define a target that depends on TensorStore...
 
 ENDIF(ENABLE_ZARR_PLUGIN)
@@ -131,7 +136,7 @@ INCLUDE(GNUInstallDirs)
 ADD_SUBDIRECTORY(plugins)
 INCLUDE_DIRECTORIES(plugins)
 
-ADD_SUBDIRECTORY(macsio)
+ADD_SUBDIRECTORY(IOmetry)
 
 OPTION(BUILD_DOCS "Build MACSio Doxygen documentation?" OFF)
 IF(BUILD_DOCS)

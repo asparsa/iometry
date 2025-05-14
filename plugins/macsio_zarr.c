@@ -36,13 +36,15 @@
 #include "tensorstore/util/endian.h"
 #include "tensorstore/data_type.h"
 namespace{
-using ::tensorstore::Context;
-using ::tensorstore::DimensionSet;
-using ::tensorstore::DimensionIndex;
-using ::tensorstore::Index;
+using tensorstore::Index;
+}
+/*
+namespace{
+using tensorstore::Context;
+using tensorstore::Index;
 using tensorstore::dtypes::int64_t;
 using tensorstore::dtypes::float16_t;
-}
+}*/
 static int num_th=1;
 static int dim1=1;
 static int dim2=1;
@@ -79,22 +81,25 @@ static int dim3=1;
     }}
   };
 }
-::nlohmann::json GetJsonSpec2(int th, std::vector<int> shape,const char* path, std::vector<int> chunksize) {
+::nlohmann::json GetJsonSpec2(int th, const std::vector<int> shape, const char* path, const std::vector<int> chunksize, const int level) {
   return ::nlohmann::json{
         {"driver", "zarr3"},
+	{"data_copy_concurrency", {{"limit", th}}},
         {"kvstore",
          {
              {"driver", "file"},
              {"path", path},
+		{"file_io_concurrency", {{"limit", 1}}},
          }},
         {"metadata",
          {
-             {"data_type", "int32"},
+             {"zarr_format", 3},
+             {"data_type", "float64"},
              {"shape", shape},
                 {"codecs",
                         {
                                 {{"name","gzip"},
-                                        {"configuration",{{"level",1}}}}
+                                        {"configuration",{{"level",level}}}}
                 }}}
         }};
 }
@@ -112,7 +117,7 @@ static int dim3=1;
     };
   }
 
-static auto context = Context::Default();
+static auto context = tensorstore::Context::Default();
 static char const *iface_name = "zarr";
 static char const *iface_ext = "zarr";
 
@@ -169,7 +174,7 @@ static int process_args(int argi, int argc, char *argv[]) {
     return 0;
 }
 //create tensorstore file
-static auto CreateFile( std::vector<int> shape, const char* path,std::vector<int> chunksize ){
+static auto CreateFile( std::vector<int> shape, const char* path,std::vector<int> chunksize,int level ){
 	//::nlohmann::json json_spec=GetJsonSpec2(path,shape,chunksize,num_th);
 	/*
 	if(level==0)
@@ -179,9 +184,15 @@ static auto CreateFile( std::vector<int> shape, const char* path,std::vector<int
 	*/
 	 //assert(json_spec.empty());
 //printf("the num_th is=%d", num_th);	
+if (level !=0){
+auto store_result2 = tensorstore::Open(GetJsonSpec2(num_th,shape,path,chunksize,level), context, tensorstore::OpenMode::create, tensorstore::ReadWriteMode::read_write);
+return store_result2;
+}
 auto store_result = tensorstore::Open(writejson(num_th,shape,path,chunksize), context, tensorstore::OpenMode::create, tensorstore::ReadWriteMode::read_write);
 return store_result;
 }
+//return store_result;
+//}
 /*
 static auto createdata2(json_object *main_obj, int i, std::vector<int> shape){
 //this lines gets the data from json and save it to a array	
@@ -206,7 +217,6 @@ return array2;
 static auto createdata2d(json_object *main_obj, int type,std::vector<int> shape){
 const Index rows = shape[0];
 const Index cols = shape[1];
-const Index z=shape[1];
 auto array=tensorstore::AllocateArray<int>({rows,cols});
 
 if (type==0){
@@ -221,8 +231,6 @@ return array;
 
 static auto createdata1d(json_object *main_obj, int type,std::vector<int> shape){
 const Index rows = shape[0];
-const Index cols = shape[1];
-const Index z=shape[1];
 auto array=tensorstore::AllocateArray<int>({rows});
 
 if (type==0){
@@ -237,7 +245,7 @@ return array;
 static auto createdata3d(json_object *main_obj, int type,std::vector<int> shape){
 const Index rows = shape[0];
 const Index cols = shape[1];
-const Index z=shape[1];
+const Index z=shape[2];
 auto array=tensorstore::AllocateArray<int>({rows,cols,z});
 
 if (type==0){
@@ -279,32 +287,96 @@ char fileName[256];
 //std::vector<int> shape={dim1,dim2};
 //printf("dim1=%d dim2=%d",dim1,dim2);
 //time to create zarr array
+if (num_dims == 1) {
+    chunksize = {shape1};
+    shape     = {dim1};
 
+    main_dump_sif_tid = MT_StartTimer("data_create_time", main_dump_sif_grp, dumpn);
+    auto data = createdata1d(main_obj, 0, shape);
+    timer_dt  = MT_StopTimer(main_dump_sif_tid);
+sprintf(fileName, "zarr_%03d",dumpn);
+main_dump_sif_tid = MT_StartTimer("Zarr_create_time", main_dump_sif_grp, dumpn);
+auto create=CreateFile(shape,fileName,chunksize,level).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid);
+//timing for writing to zarr
+ main_dump_sif_tid = MT_StartTimer("Zarr_write_time", main_dump_sif_grp, dumpn);
+ auto write_result = tensorstore::Write(data,create).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid);
+timer_dt2 = MT_StopTimer(whole_timer);
+if (!write_result.ok()) {
+    std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
+}
+else std::cerr << "succesful write ";
+} else if (num_dims == 2) {
+chunksize = {shape1,shape2};
+    shape     = {dim1,dim2};
+    main_dump_sif_tid = MT_StartTimer("data_create_time", main_dump_sif_grp, dumpn);
+    auto data = createdata2d(main_obj, 0, shape);
+    timer_dt  = MT_StopTimer(main_dump_sif_tid);
+sprintf(fileName, "zarr_%03d",dumpn);
+main_dump_sif_tid = MT_StartTimer("Zarr_create_time", main_dump_sif_grp, dumpn);
+auto create=CreateFile(shape,fileName,chunksize,level).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid);
+//timing for writing to zarr
+ main_dump_sif_tid = MT_StartTimer("Zarr_write_time", main_dump_sif_grp, dumpn);
+ auto write_result = tensorstore::Write(data,create).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid);
+timer_dt2 = MT_StopTimer(whole_timer);
+if (!write_result.ok()) {
+    std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
+}
+else std::cerr << "succesful write ";
+} else {                        // num_dims == 3 (or any other value you intend)
+    chunksize = {shape1, shape2, shape3};
+    shape     = {dim1, dim2, dim3};
+
+    main_dump_sif_tid = MT_StartTimer("data_create_time", main_dump_sif_grp, dumpn);
+    auto data = createdata3d(main_obj, 0, shape);
+    timer_dt  = MT_StopTimer(main_dump_sif_tid);
+	sprintf(fileName, "zarr_%03d",dumpn);
+main_dump_sif_tid = MT_StartTimer("Zarr_create_time", main_dump_sif_grp, dumpn);
+auto create=CreateFile(shape,fileName,chunksize,level).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid);
+//timing for writing to zarr
+ main_dump_sif_tid = MT_StartTimer("Zarr_write_time", main_dump_sif_grp, dumpn);
+ auto write_result = tensorstore::Write(data,create).result();
+timer_dt = MT_StopTimer(main_dump_sif_tid);
+timer_dt2 = MT_StopTimer(whole_timer);
+if (!write_result.ok()) {
+    std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
+}
+else std::cerr << "succesful write ";
+}
+
+
+
+/*
  chunksize={shape1,shape2};
  shape={dim1,dim2};
+if (num_dims==2){
 main_dump_sif_tid = MT_StartTimer("data_create_time", main_dump_sif_grp, dumpn);
-auto data=createdata1d(main_obj,0,shape);
-timer_dt = MT_StopTimer(main_dump_sif_tid);
+auto data=createdata2d(main_obj,0,shape);
+timer_dt = MT_StopTimer(main_dump_sif_tid);}
 if(num_dims==1){
  chunksize={shape1};
  shape={dim1};
 main_dump_sif_tid = MT_StartTimer("data_create_time", main_dump_sif_grp, dumpn);
-auto data=createdata2d(main_obj,0,shape);
+auto data=createdata1d(main_obj,0,shape);
 timer_dt = MT_StopTimer(main_dump_sif_tid);
 }
-else if(num_dims==3) {
+else {
 chunksize={shape1,shape2,shape3};
 shape={dim1,dim2,dim3};
 main_dump_sif_tid = MT_StartTimer("data_create_time", main_dump_sif_grp, dumpn);
 auto data=createdata3d(main_obj,0,shape);
 timer_dt = MT_StopTimer(main_dump_sif_tid);
 }
-/*
+
 //timing for creating the zarr file
 main_dump_sif_tid = MT_StartTimer("Zarr_create_time", main_dump_sif_grp, dumpn);
 auto create=CreateFile(fileName,shape,shape).result();
 timer_dt = MT_StopTimer(main_dump_sif_tid); 
-*/
+
 //for(int i=0;i<1000;i++){
 sprintf(fileName, "zarr_%03d",dumpn);
 main_dump_sif_tid = MT_StartTimer("Zarr_create_time", main_dump_sif_grp, dumpn);
@@ -320,6 +392,7 @@ if (!write_result.ok()) {
     std::cerr << "Failed to write to store: " << write_result.status() << std::endl;
 }
 else std::cerr << "succesful write "; 
+*/
 }
 
 static void main_read_full(const char* path,json_object *main_obj, int loadnumber )

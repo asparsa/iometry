@@ -23,7 +23,7 @@ You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
-
+#include <random>
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -85,7 +85,8 @@ CD[5]=(unsigned int)MiE; N=6;}} while(0)
 \defgroup MACSIO_PLUGIN_HDF5 MACSIO_PLUGIN_HDF5
 @{
 */
-
+#define NUM_POINTS 2048
+#define NUM_HUGE 4096
 /*! \brief name of this plugin */
 static char const *iface_name = "hdf5";
 
@@ -95,6 +96,9 @@ static char const *iface_ext = "h5";
 static int use_log = 0; /**< Use HDF5's logging fapl */
 static int no_collective = 0; /**< Use HDF5 independent (e.g. not collective) I/O */
 static int no_single_chunk = 0; /**< disable single chunking */
+static int chunk1 = 1;
+static int chunk2 = 1;
+static int chunk3 = 1; 
 static int silo_block_size = 0; /**< block size for silo block-based VFD */
 static int silo_block_count = 0; /**< block count for silo block-based VFD */
 static int sbuf_size = -1; /**< HDF5 library sieve buf size */
@@ -107,7 +111,9 @@ static hid_t dspc = -1;
 static int show_errors = 0;
 static char compression_alg_str[64];
 static char compression_params_str[512];
-
+static char read_type[64];
+static char read_sample[64];
+static char newpath[64];
 /*! \brief create HDF5 library file access property list */
 static hid_t make_fapl()
 {
@@ -238,18 +244,28 @@ make_dcpl(
     int ndims;
     hsize_t dims[4], maxdims[4];
     hid_t retval = H5Pcreate(H5P_DATASET_CREATE);
-
+	H5Sget_simple_extent_dims(space_id, dims, maxdims);
+	ndims = H5Sget_simple_extent_ndims(space_id);
     szip_method[0] = '\0';
     szip_chunk_str[0] = '\0';
-
+    //nu_chunk=4;
     /* Initially, set contiguous layout. May reset to chunked later */
+    //if (dims[i] % (nu_chunk/2)!=2) chunk_dims[i]++;}
+	if (chunk1 == 1) {
     H5Pset_layout(retval, H5D_CONTIGUOUS);
+} else {
+    H5Pset_layout(retval, H5D_CHUNKED);
 
-    if (!alg_str || !strlen(alg_str))
+    hsize_t chunk_dims[ndims];
+	int tmp1[3]={chunk1,chunk2,chunk3};
+	for (int i=0;i<ndims;i++) chunk_dims[i]=tmp1[i];
+    H5Pset_chunk(retval, ndims, chunk_dims);
+}
+    
+
+	if (!alg_str || !strlen(alg_str))
         return retval;
 
-    ndims = H5Sget_simple_extent_ndims(space_id);
-    H5Sget_simple_extent_dims(space_id, dims, maxdims);
 
     /* We can make a pass through params string without being specific about
        algorithm because there are presently no symbol collisions there */
@@ -288,15 +304,15 @@ make_dcpl(
  
     /* Initially, as a default in case nothing else is selected,
        set chunk size equal to dataset size (e.g. single chunk) */
-    H5Pset_chunk(retval, ndims, dims);
 
     if (!strncasecmp(alg_str, "gzip", 4))
     {
-        if (shuffle == -1 || shuffle == 1)
-            H5Pset_shuffle(retval);
+       // if (shuffle == -1 || shuffle == 1)
+         //   H5Pset_shuffle(retval);
         H5Pset_deflate(retval, gzip_level!=-1?gzip_level:9);
     }
-    else if (!strncasecmp(alg_str, "zfp", 3))
+ 
+     if (!strncasecmp(alg_str, "zfp", 3))
     {
         unsigned int cd_values[10];
         int cd_nelmts = 10;
@@ -378,11 +394,25 @@ process_args(
 
     char *c_alg = compression_alg_str;
     char *c_params = compression_params_str;
-
+    char *r_type=read_type;
+	char *r_sample=read_sample;
+	char *np=newpath;
     MACSIO_CLARGS_ProcessCmdline(0, argFlags, argi, argc, argv,
         "--show_errors", "",
             "Show low-level HDF5 errors",
             &show_errors,
+	    "--chunk_dims %d %d %d", "",
+	    "number of chunks for dataset",
+	    &chunk1, &chunk2, &chunk3,
+	    "--read_type %s", "",
+	    "choose between full, random points, hyperslap, overlaping hyperslap",
+		&r_type,
+	"--read_sample %s","",
+	    "Choose between SMALL and Large",
+	    &r_sample,
+	"--path %s", "",
+	"give new path here",
+	&np,
         "--compression %s %s", MACSIO_CLARGS_NODEFAULT,
             "The first string argument is the compression algorithm name. The second\n"
             "string argument is a comma-separated set of params of the form\n"
@@ -512,10 +542,9 @@ main_dump_sif(
 #if H5_HAVE_PARALLEL
     H5Pset_fapl_mpio(fapl_id, MACSIO_MAIN_Comm, mpiInfo);
 #endif
-
 //#warning FOR MIF, NEED A FILEROOT ARGUMENT OR CHANGE TO FILEFMT ARGUMENT
     /* Construct name for the HDF5 file */
-    sprintf(fileName, "%s_hdf5_%03d.%s",
+    sprintf(fileName, "/tmp/%s_hdf5_%03d.%s",
         json_object_path_get_string(main_obj, "clargs/filebase"),
         dumpn,
         json_object_path_get_string(main_obj, "clargs/fileext"));
@@ -559,20 +588,20 @@ main_dump_sif(
 
     /* Loop over vars and then over parts */
     /* currently assumes all vars exist on all ranks. but not all parts */
-    for (v = -1; v < json_object_array_length(first_part_vars_array); v++) /* -1 start is for Mesh */
+    for (int ss=0; ss<1;ss++) /* -1 start is for Mesh */
     {
 
 //#warning SKIPPING MESH
-        if (v == -1) continue; /* All ranks skip mesh (coords) for now */
+        /* All ranks skip mesh (coords) for now */
 
         /* Inspect the first part's var object for name, datatype, etc. */
-        json_object *var_obj = json_object_array_get_idx(first_part_vars_array, v);
-        char const *varName = json_object_path_get_string(var_obj, "name");
+        json_object *var_obj = json_object_array_get_idx(first_part_vars_array, 0);
+        char varName[256];
+	sprintf(varName,"constant_%03d",ss);
         char *centering = strdup(json_object_path_get_string(var_obj, "centering"));
         json_object *dataobj = json_object_path_get_extarr(var_obj, "data");
 //#warning JUST ASSUMING TWO TYPES NOW. CHANGE TO A FUNCTION
-        hid_t dtype_id = json_object_extarr_type(dataobj)==json_extarr_type_flt64? 
-                H5T_NATIVE_DOUBLE:H5T_NATIVE_INT;
+        hid_t dtype_id = H5T_NATIVE_DOUBLE; 
         hid_t fspace_id = H5Scopy(strcmp(centering, "zone") ? fspace_nodal_id : fspace_zonal_id);
         hid_t dcpl_id = make_dcpl(compression_alg_str, compression_params_str, fspace_id, dtype_id);
 
@@ -604,7 +633,7 @@ main_dump_sif(
                 hsize_t starts[3], counts[3];
                 json_object *vars_array = json_object_path_get_array(part_obj, "Vars");
                 json_object *mesh_obj = json_object_path_get_object(part_obj, "Mesh");
-                json_object *var_obj = json_object_array_get_idx(vars_array, v);
+                json_object *var_obj = json_object_array_get_idx(vars_array, 0);
                 json_object *extarr_obj = json_object_path_get_extarr(var_obj, "data");
                 json_object *global_log_origin_array =
                     json_object_path_get_array(part_obj, "GlobalLogOrigin");
@@ -962,7 +991,561 @@ main_dump(
         timer_dt = MT_StopTimer(main_dump_tid);
     }
 }
+#define NUM_HYPERSLABS 4
+#define HYPERSLAB_ROWS 2048
+#define HYPERSLAB_COLS 2048
+#define S_COLS 10484
+static void main_read_multihyper(const char* path,json_object *main_obj, int loadnumber )
+{
+        MACSIO_TIMING_GroupMask_t main_read_full_grp = MACSIO_TIMING_GroupMask("main_read_multihyper");
+        MACSIO_TIMING_TimerId_t main_read_full_tid;
+        double timer_dt;
+         printf("multi hyper \n");
+         char dataset_name[]="dataset00_0";
+	hsize_t offset[NUM_HYPERSLABS][2] = {
+        {100, 100},
+        {15000, 200},
+        {15000, 15000},
+        {200, 15000}
+    };
+    hsize_t count[2] = {HYPERSLAB_ROWS, HYPERSLAB_COLS};
+    hsize_t slab_size = HYPERSLAB_ROWS * HYPERSLAB_COLS;
 
+    // Open HDF5 file
+    hid_t file_id = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file_id < 0) {
+        fprintf(stderr, "ERROR: Unable to open file: %s\n", path);
+        return;
+    }
+
+    // Open dataset
+    hid_t dataset_id = H5Dopen(file_id, dataset_name, H5P_DEFAULT);
+    if (dataset_id < 0) {
+        fprintf(stderr, "ERROR: Failed to open dataset: %s\n", dataset_name);
+        H5Fclose(file_id);
+        return;
+    }
+
+    // Get file dataspace and dataset dimensions
+    hid_t file_space_id = H5Dget_space(dataset_id);
+    if (file_space_id < 0) {
+        fprintf(stderr, "ERROR: Failed to get dataspace from dataset.\n");
+        H5Dclose(dataset_id);
+        H5Fclose(file_id);
+        return;
+    }
+
+    int rank = H5Sget_simple_extent_ndims(file_space_id);
+
+    hsize_t dset_dims[2];
+    H5Sget_simple_extent_dims(file_space_id, dset_dims, NULL);
+    printf("Dataset dims: %llu x %llu\n", dset_dims[0], dset_dims[1]);
+	if(!strcmp(read_sample,"SMALL")){
+    // Allocate data buffer
+    int *data = (int *) malloc(NUM_HYPERSLABS * slab_size * sizeof(int));
+    if (!data) {
+        fprintf(stderr, "ERROR: malloc failed.\n");
+        H5Sclose(file_space_id);
+        H5Dclose(dataset_id);
+        H5Fclose(file_id);
+        return;
+    }
+
+    // Create memory dataspace for each read
+    hsize_t mem_dims[2] = {HYPERSLAB_ROWS, HYPERSLAB_COLS};
+    hid_t mem_space_id = H5Screate_simple(2, mem_dims, NULL);
+
+    // Loop over hyperslabs
+    main_read_full_tid = MT_StartTimer("small_read", main_read_full_grp, loadnumber);
+    for (int i = 0; i < NUM_HYPERSLABS; i++) {
+        //printf("Hyperslab %d: offset = (%llu, %llu)\n", i, offset[i][0], offset[i][1]);
+
+        // Bounds check
+
+        // Copy file dataspace for isolated hyperslab selection
+        hid_t single_file_space = H5Scopy(file_space_id);
+
+        // Select hyperslab
+        herr_t status = H5Sselect_hyperslab(single_file_space, H5S_SELECT_SET, offset[i], NULL, count, NULL);
+
+        // Compute buffer location for this slab
+        int *mem_ptr = data + i * slab_size;
+        // Read hyperslab into memory
+        status = H5Dread(dataset_id, H5T_NATIVE_INT, mem_space_id, single_file_space, H5P_DEFAULT, mem_ptr);
+        if (status < 0) {
+            fprintf(stderr, "ERROR: H5Dread failed at hyperslab %d\n", i);
+        }
+
+        H5Sclose(single_file_space);
+    }
+	timer_dt = MT_StopTimer(main_read_full_tid);
+    // Cleanup
+    free(data);
+    H5Sclose(mem_space_id);
+    H5Sclose(file_space_id);
+    H5Dclose(dataset_id);
+}
+else{
+hsize_t count[2] = {S_COLS, S_COLS};
+    hsize_t slab_size = S_COLS*S_COLS;
+int *data = (int *) malloc(NUM_HYPERSLABS * slab_size * sizeof(int));
+    if (!data) {
+        fprintf(stderr, "ERROR: malloc failed.\n");
+        H5Sclose(file_space_id);
+        H5Dclose(dataset_id);
+        H5Fclose(file_id);
+        return;
+    }
+
+    // Create memory dataspace for each read
+    hsize_t mem_dims[2] = {S_COLS, S_COLS};
+    hid_t mem_space_id = H5Screate_simple(2, mem_dims, NULL);
+
+    // Loop over hyperslabs
+    main_read_full_tid = MT_StartTimer("large_read", main_read_full_grp, loadnumber);
+    for (int i = 0; i < NUM_HYPERSLABS; i++) {
+	/*
+        if (offset[i][0] + count[0] > dset_dims[0] || offset[i][1] + count[1] > dset_dims[1]) {
+            printf( "Skipping hyperslab %d: out of bounds\n", i);
+            continue;
+        }
+
+        herr_t status = H5Sselect_hyperslab(single_file_space, H5S_SELECT_SET, offset[i], NULL, count, NULL);
+        if (status < 0) {
+            fprintf(stderr, "ERROR: H5Sselect_hyperslab failed at %d\n", i);
+            H5Sclose(single_file_space);
+            continue;
+        }*/
+        hid_t single_file_space = H5Scopy(file_space_id);
+	int *mem_ptr = data + i * slab_size;
+        herr_t status = H5Sselect_hyperslab(single_file_space, H5S_SELECT_SET, offset[i], NULL, count, NULL);
+	status = H5Dread(dataset_id, H5T_NATIVE_INT, mem_space_id, single_file_space, H5P_DEFAULT, mem_ptr);
+        if (status < 0) {
+            fprintf(stderr, "ERROR: H5Dread failed at hyperslab %d\n", i);
+        }
+
+        H5Sclose(single_file_space);
+    }
+        timer_dt = MT_StopTimer(main_read_full_tid);
+    // Cleanup
+    free(data);
+    H5Sclose(mem_space_id);
+    H5Sclose(file_space_id);
+    H5Dclose(dataset_id);
+}
+}
+static void main_read_overhyper(const char* path,json_object *main_obj, int loadnumber )
+{
+        MACSIO_TIMING_GroupMask_t main_read_full_grp = MACSIO_TIMING_GroupMask("main_read_overhyper");
+        MACSIO_TIMING_TimerId_t main_read_full_tid;
+        double timer_dt;
+	char dataset_name[]="dataset00_0";
+	hsize_t offset[NUM_HYPERSLABS][2] = {
+        {15000, 15000},
+        {9000, 9000},
+        {9000, 15000},
+        {15000, 9000}
+    };
+    hsize_t count[2] = {HYPERSLAB_ROWS, HYPERSLAB_COLS};
+    hsize_t slab_size = HYPERSLAB_ROWS * HYPERSLAB_COLS;
+
+    // Open HDF5 file
+    hid_t file_id = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file_id < 0) {
+        fprintf(stderr, "ERROR: Unable to open file: %s\n", path);
+        return;
+    }
+
+    // Open dataset
+    hid_t dataset_id = H5Dopen(file_id, dataset_name, H5P_DEFAULT);
+    if (dataset_id < 0) {
+        fprintf(stderr, "ERROR: Failed to open dataset: %s\n", dataset_name);
+        H5Fclose(file_id);
+        return;
+    }
+
+    // Get file dataspace and dataset dimensions
+    hid_t file_space_id = H5Dget_space(dataset_id);
+    if (file_space_id < 0) {
+        fprintf(stderr, "ERROR: Failed to get dataspace from dataset.\n");
+        H5Dclose(dataset_id);
+        H5Fclose(file_id);
+        return;
+    }
+
+    int rank = H5Sget_simple_extent_ndims(file_space_id);
+
+    hsize_t dset_dims[2];
+    H5Sget_simple_extent_dims(file_space_id, dset_dims, NULL);
+    printf("Dataset dims: %llu x %llu\n", dset_dims[0], dset_dims[1]);
+	if(!strcmp(read_sample,"SMALL")){
+    // Allocate data buffer
+    int *data = (int *) malloc(NUM_HYPERSLABS * slab_size * sizeof(int));
+    if (!data) {
+        fprintf(stderr, "ERROR: malloc failed.\n");
+        H5Sclose(file_space_id);
+        H5Dclose(dataset_id);
+        H5Fclose(file_id);
+        return;
+    }
+
+    // Create memory dataspace for each read
+    hsize_t mem_dims[2] = {HYPERSLAB_ROWS, HYPERSLAB_COLS};
+    hid_t mem_space_id = H5Screate_simple(2, mem_dims, NULL);
+
+    // Loop over hyperslabs
+    main_read_full_tid = MT_StartTimer("small_read", main_read_full_grp, loadnumber);
+    for (int i = 0; i < NUM_HYPERSLABS; i++) {
+        hid_t single_file_space = H5Scopy(file_space_id);
+        herr_t status = H5Sselect_hyperslab(single_file_space, H5S_SELECT_SET, offset[i], NULL, count, NULL);
+        int *mem_ptr = data + i * slab_size;
+        status = H5Dread(dataset_id, H5T_NATIVE_INT, mem_space_id, single_file_space, H5P_DEFAULT, mem_ptr);
+        if (status < 0) {
+            fprintf(stderr, "ERROR: H5Dread failed at hyperslab %d\n", i);
+        }
+
+        H5Sclose(single_file_space);
+    }
+	timer_dt = MT_StopTimer(main_read_full_tid);
+    // Cleanup
+    free(data);
+    H5Sclose(mem_space_id);
+    H5Sclose(file_space_id);
+    H5Dclose(dataset_id);
+    H5Fclose(file_id);
+}
+else{
+hsize_t count[2] = {S_COLS, S_COLS};
+    hsize_t slab_size = S_COLS * S_COLS;
+int *data = (int *) malloc(NUM_HYPERSLABS * slab_size * sizeof(int));
+    if (!data) {
+        fprintf(stderr, "ERROR: malloc failed.\n");
+        H5Sclose(file_space_id);
+        H5Dclose(dataset_id);
+        H5Fclose(file_id);
+        return;
+    }
+
+    // Create memory dataspace for each read
+    hsize_t mem_dims[2] = {S_COLS, S_COLS};
+    hid_t mem_space_id = H5Screate_simple(2, mem_dims, NULL);
+
+    // Loop over hyperslabs
+    main_read_full_tid = MT_StartTimer("huge_read", main_read_full_grp, loadnumber);
+    for (int i = 0; i < NUM_HYPERSLABS; i++) {
+        hid_t single_file_space = H5Scopy(file_space_id);
+        herr_t status = H5Sselect_hyperslab(single_file_space, H5S_SELECT_SET, offset[i], NULL, count, NULL);
+        int *mem_ptr = data + i * slab_size;
+        status = H5Dread(dataset_id, H5T_NATIVE_INT, mem_space_id, single_file_space, H5P_DEFAULT, mem_ptr);
+        if (status < 0) {
+            fprintf(stderr, "ERROR: H5Dread failed at hyperslab %d\n", i);
+        }
+
+        H5Sclose(single_file_space);
+    }
+        timer_dt = MT_StopTimer(main_read_full_tid);
+    // Cleanup
+    free(data);
+    H5Sclose(mem_space_id);
+    H5Sclose(file_space_id);
+    H5Dclose(dataset_id);
+    H5Fclose(file_id);
+}
+}
+
+static void main_read_hyper(const char* path,json_object *main_obj, int loadnumber )
+{
+        MACSIO_TIMING_GroupMask_t main_read_full_grp = MACSIO_TIMING_GroupMask("main_read_hyper");
+        MACSIO_TIMING_TimerId_t main_read_full_tid;
+        double timer_dt;
+         printf("main hyper \n");
+         char dataset_name[]="dataset00_0";
+        main_read_full_tid = MT_StartTimer("H5Fopen", main_read_full_grp, loadnumber);
+        hid_t h5file_id = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
+        timer_dt = MT_StopTimer(main_read_full_tid);
+        hid_t dataset_id, space_id, datatype;
+herr_t status;
+hsize_t dims[2]; // Adjust based on expected dataset rank.
+int rank;
+
+// small hyperslab 
+hsize_t start1[2] = {1000, 1000};  
+hsize_t count1[2] = {8192, 8192};  
+
+// HUGE hyperslab
+hsize_t start2[2] = {1000, 1000};  
+hsize_t count2[2] = {20968, 20968};  
+
+main_read_full_tid = MT_StartTimer("H5Dopen", main_read_full_grp, loadnumber);
+dataset_id = H5Dopen(h5file_id, dataset_name, H5P_DEFAULT);
+timer_dt = MT_StopTimer(main_read_full_tid);
+
+space_id = H5Dget_space(dataset_id);
+datatype = H5Dget_type(dataset_id);
+rank = H5Sget_simple_extent_ndims(space_id);
+H5Sget_simple_extent_dims(space_id, dims, NULL);
+printf("Dataset rank: %d, Dimensions: %llu x %llu\n", rank, dims[0], dims[1]);
+
+// Allocate memory for each hyperslab
+size_t data_size = H5Tget_size(datatype);
+size_t total_size1 = data_size * count1[0] * count1[1];
+size_t total_size2 = data_size * count2[0] * count2[1];
+
+void *data1 = malloc(total_size1);
+void *data2 = malloc(total_size2);
+if (!data1 || !data2) {
+    printf("Memory allocation failed.\n");
+    free(data1);
+    free(data2);
+    H5Sclose(space_id);
+    H5Tclose(datatype);
+    H5Dclose(dataset_id);
+    H5Fclose(h5file_id);
+    return;
+}
+
+// Read first hyperslab
+if (!strcmp(read_sample,"SMALL")){
+hid_t memspace_id1 = H5Screate_simple(rank, count1, NULL);
+H5Sselect_none(space_id);  // Reset previous selection
+status = H5Sselect_hyperslab(space_id, H5S_SELECT_SET, start1, NULL, count1, NULL);
+if (status < 0) {
+    printf("Failed to select first hyperslab.\n");
+} else {
+    main_read_full_tid = MT_StartTimer("small_read", main_read_full_grp, loadnumber);
+    status = H5Dread(dataset_id, datatype, memspace_id1, space_id, H5P_DEFAULT, data1);
+    timer_dt = MT_StopTimer(main_read_full_tid);
+    if (status < 0) {
+        printf("Failed to read first hyperslab.\n");
+    } else {
+        printf("Successfully read first hyperslab.\n");
+    }
+}
+H5Sclose(memspace_id1);
+free(data1);
+free(data2);
+H5Sclose(space_id);
+H5Tclose(datatype);
+H5Dclose(dataset_id);
+H5Fclose(h5file_id);
+}else{
+// Read second hyperslab
+hid_t memspace_id2 = H5Screate_simple(rank, count2, NULL);
+H5Sselect_none(space_id);  // Reset previous selection
+status = H5Sselect_hyperslab(space_id, H5S_SELECT_SET, start2, NULL, count2, NULL);
+if (status < 0) {
+    printf("Failed to select second hyperslab.\n");
+} else {
+    main_read_full_tid = MT_StartTimer("huge_read", main_read_full_grp, loadnumber);
+    status = H5Dread(dataset_id, datatype, memspace_id2, space_id, H5P_DEFAULT, data2);
+    timer_dt = MT_StopTimer(main_read_full_tid);
+    if (status < 0) {
+        printf("Failed to read second hyperslab.\n");
+    } else {
+        printf("Successfully read second hyperslab.\n");
+    }
+}
+H5Sclose(memspace_id2);
+
+// Clean up
+free(data1);
+free(data2);
+H5Sclose(space_id);
+H5Tclose(datatype);
+H5Dclose(dataset_id);
+H5Fclose(h5file_id);
+}
+}
+
+
+static void main_read_full(const char* path,json_object *main_obj, int loadnumber )
+{
+        MACSIO_TIMING_GroupMask_t main_read_full_grp = MACSIO_TIMING_GroupMask("main_read_full");
+        MACSIO_TIMING_TimerId_t main_read_full_tid;
+        double timer_dt;
+	 printf("main read full \n");
+	 char dataset_name[]="dataset00_0";
+        main_read_full_tid = MT_StartTimer("H5Fopen", main_read_full_grp, loadnumber);
+        hid_t h5file_id = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
+        timer_dt = MT_StopTimer(main_read_full_tid);
+	hid_t dataset_id, space_id, datatype;	
+	herr_t status;
+    	hsize_t dims[2]; // Adjust based on expected dataset rank.
+    	int rank;
+	main_read_full_tid = MT_StartTimer("H5Dopen", main_read_full_grp, loadnumber);
+        dataset_id = H5Dopen2(h5file_id, dataset_name, H5P_DEFAULT);
+	timer_dt = MT_StopTimer(main_read_full_tid);
+	space_id = H5Dget_space(dataset_id);
+    	datatype = H5Dget_type(dataset_id);
+	rank = H5Sget_simple_extent_ndims(space_id);
+	H5Sget_simple_extent_dims(space_id, dims, NULL);
+	printf("Dataset rank: %d, Dimensions: %llu x %llu\n", rank, dims[0], dims[1]);
+	size_t data_size = H5Tget_size(datatype);
+    size_t total_size = data_size;
+    for (int i = 0; i < rank; i++) {
+        total_size *= dims[i];
+    }
+    void *data = malloc(total_size);
+    if (!data) {
+        printf("Memory allocation failed.\n");
+        H5Sclose(space_id);
+        H5Tclose(datatype);
+        H5Dclose(dataset_id);
+        H5Fclose(h5file_id);
+        return;
+    }
+main_read_full_tid = MT_StartTimer("reading data", main_read_full_grp, loadnumber);    
+status = H5Dread(dataset_id, datatype, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
+timer_dt = MT_StopTimer(main_read_full_tid);
+if (status < 0) {
+        printf("Failed to read dataset: %s\n", dataset_name);
+    } else {
+        printf("Successfully read dataset: %s\n", dataset_name);
+    }
+free(data);
+    H5Sclose(space_id);
+    H5Tclose(datatype);
+    H5Dclose(dataset_id);
+    H5Fclose(h5file_id);
+}
+static void main_read_rand(const char* path,json_object *main_obj, int loadnumber ) 
+{
+
+
+MACSIO_TIMING_GroupMask_t main_read_full_grp = MACSIO_TIMING_GroupMask("main_read_rand");
+MACSIO_TIMING_TimerId_t main_read_full_tid;
+double timer_dt;
+hid_t file_id, dataset_id, dataspace_id;
+    herr_t status;
+	printf("main read rand \n");
+	char dataset_name[]="dataset00_0";
+    // Open the file
+    main_read_full_tid = MT_StartTimer("H5Fopen", main_read_full_grp, loadnumber);
+    file_id = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
+	timer_dt = MT_StopTimer(main_read_full_tid);
+    	if (file_id < 0) {
+    printf( "Failed to open file: %s\n", path);
+}
+	// Open the dataset
+    main_read_full_tid = MT_StartTimer("H5Dopen", main_read_full_grp, loadnumber);
+    dataset_id = H5Dopen(file_id, dataset_name, H5P_DEFAULT);
+	timer_dt = MT_StopTimer(main_read_full_tid);
+    if (dataset_id < 0) {
+    fprintf(stderr, "Failed to open dataset: %s\n", dataset_name);
+}
+	// Get the dataspace
+    dataspace_id = H5Dget_space(dataset_id);
+	
+    // Get dataset rank and dims
+    int rank;
+    hsize_t dims[2];
+    rank = H5Sget_simple_extent_ndims(dataspace_id);
+H5Sget_simple_extent_dims(dataspace_id, dims, NULL);
+//printf("Dataset rank: %d, dims: %llu x %llu\n", rank, dims[0], dims[1]);
+
+hsize_t (*coords)[2] = NULL;
+
+if (!strcmp(read_sample, "SMALL")) {
+    coords = (hsize_t (*)[2]) malloc(NUM_POINTS * sizeof(hsize_t[2]));
+    srand(time(NULL));
+
+    for (int idx = 0; idx < NUM_POINTS; idx++) {
+        coords[idx][0] = rand() % 32768;
+        coords[idx][1] = rand() % 32768;
+    }
+hsize_t dims[1] = {NUM_POINTS};
+hid_t memspace_id = H5Screate_simple(1, dims, NULL);
+
+    // Select the points
+    status = H5Sselect_elements(dataspace_id, H5S_SELECT_SET, NUM_POINTS, (const hsize_t *)coords);
+
+    // Allocate buffer
+    int *data = (int *) malloc(NUM_POINTS * sizeof(int));
+
+    // Read data
+    main_read_full_tid = MT_StartTimer("Read_data_small", main_read_full_grp, loadnumber);
+    status = H5Dread(dataset_id, H5T_NATIVE_INT, memspace_id, dataspace_id, H5P_DEFAULT, data);
+    timer_dt = MT_StopTimer(main_read_full_tid);
+if (status < 0) {
+    printf("Failed to read data\n");
+}
+
+    // Clean up
+    free(coords);
+    free(data);
+H5Sclose(memspace_id);
+
+
+	}else{
+coords = (hsize_t (*)[2]) malloc(NUM_HUGE * sizeof(hsize_t[2]));
+    srand(time(NULL));
+hsize_t dims[1] = {NUM_HUGE};
+hid_t memspace_id = H5Screate_simple(1, dims, NULL);
+
+
+    for (int idx = 0; idx < NUM_HUGE; idx++) {
+        coords[idx][0] = rand() %  16384;
+        coords[idx][1] = rand() %  16384;
+    }
+
+    // Select the points
+    status = H5Sselect_elements(dataspace_id, H5S_SELECT_SET, NUM_HUGE, (const hsize_t *)coords);
+
+    // Allocate buffer
+    int *data = (int *) malloc(NUM_HUGE * sizeof(int));
+
+    // Read data
+    main_read_full_tid = MT_StartTimer("Read_data_small", main_read_full_grp, loadnumber);
+    status = H5Dread(dataset_id, H5T_NATIVE_INT, memspace_id, dataspace_id, H5P_DEFAULT, data);
+    timer_dt = MT_StopTimer(main_read_full_tid);
+
+    // Clean up
+    free(coords);
+    free(data);
+H5Sclose(memspace_id);
+
+}
+H5Dclose(dataset_id);
+H5Sclose(dataspace_id);
+H5Fclose(file_id);
+
+}
+static void main_read(int argi, int argc, char **argv, const char* path, json_object *main_obj,int loadnumber ){
+	MACSIO_TIMING_GroupMask_t main_read_grp = MACSIO_TIMING_GroupMask("main_read");
+	MACSIO_TIMING_TimerId_t main_read_tid;
+    	double timer_dt;
+
+    	int rank, size, numFiles;
+	process_args(argi, argc, argv);
+	printf("read_type=%S \n",read_type);
+	if(read_type == NULL) fprintf(stderr, "read_type is NULL!\n");
+	else if(!strcmp(read_type,"FULL")){
+	main_read_tid=MT_StartTimer("main_read_FULL",main_read_grp,loadnumber);
+	main_read_full(newpath, main_obj,loadnumber);
+       	timer_dt= MT_StopTimer(main_read_tid);	
+	}
+	else if(!strcmp(read_type,"HYPER")){
+	 main_read_tid=MT_StartTimer("main_read_hyper",main_read_grp,loadnumber);
+        main_read_hyper(newpath, main_obj,loadnumber);
+        timer_dt= MT_StopTimer(main_read_tid);
+	}
+	else if(!strcmp(read_type,"MULTI")){
+  	       main_read_tid=MT_StartTimer("main_read_multi",main_read_grp,loadnumber);
+       		 main_read_multihyper(newpath, main_obj,loadnumber);
+         	timer_dt= MT_StopTimer(main_read_tid);
+         }
+	else if(!strcmp(read_type,"OVER")){
+               main_read_tid=MT_StartTimer("main_read_over",main_read_grp,loadnumber);
+                 main_read_overhyper(newpath, main_obj,loadnumber);
+                timer_dt= MT_StopTimer(main_read_tid);
+         }
+	else if(!strncmp(read_type,"RAND",4)) {
+               main_read_tid=MT_StartTimer("main_read_rand",main_read_grp,loadnumber);
+                 main_read_rand(newpath, main_obj,loadnumber);
+                timer_dt= MT_StopTimer(main_read_tid);
+         }
+
+}
 /*! \brief Function called during static initialization to register the plugin */
 static int
 register_this_interface()
@@ -978,6 +1561,7 @@ register_this_interface()
     strcpy(iface.name, iface_name);
     strcpy(iface.ext, iface_ext);
     iface.dumpFunc = main_dump;
+    iface.loadFunc = main_read;
     iface.processArgsFunc = process_args;
 
     /* Register custom compression methods with HDF5 library */
